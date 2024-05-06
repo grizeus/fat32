@@ -27,7 +27,7 @@ int main(int argc, char **argv) {
     out_file << std::hex << std::setw(2) << std::setfill('0')
              << (int)(unsigned char)byte << " ";
   }
-
+  out_file << "\n";
   out_file.close();
   file.close();
 
