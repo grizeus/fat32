@@ -52,7 +52,7 @@ static uint32_t code_volID(struct tm *time_info) {
 }
 
 int write_check(const void *data, size_t size, size_t count, FILE *file) {
-  
+
   size_t res = fwrite(data, size, count, file);
   if (res != count) {
     fprintf(stderr, "Failed to write to file %d: %s\n", errno, strerror(errno));
@@ -140,6 +140,7 @@ int format_disk(const char *filename) {
     return -1;
   }
   fclose(file);
+  printf("Disk with id %u was formatted\n", boot_sec.BS_VOlId);
 
   return 0;
 }
