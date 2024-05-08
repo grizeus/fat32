@@ -35,7 +35,7 @@ typedef struct BootSec {
   char BS_BootCode[420];     // Boot code (420 chars set to 0x00)
   uint8_t Signature_word[2]; // 0x55 and 0xAA // Boot sector signature
   // all remainig bytes set to 0x00 (only for media where BPB_BytsPerSec > 512)
-} BootSec_t;
+}__attribute__((packed)) BootSec_t;
 
 static uint32_t code_volID(struct tm *time_info) {
 
@@ -50,7 +50,7 @@ static uint32_t code_volID(struct tm *time_info) {
 
   return VolID;
 }
-
+// write to file with error checking
 int write_check(const void *data, size_t size, size_t count, FILE *file) {
 
   size_t res = fwrite(data, size, count, file);
@@ -145,4 +145,6 @@ int format_disk(const char *filename) {
   return 0;
 }
 
-int main(int argc, char *argv[]) { return format_disk(argv[1]); }
+int main(int argc, char *argv[]) {
+  return format_disk(argv[1]);
+}
