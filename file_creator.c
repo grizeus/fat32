@@ -1,12 +1,16 @@
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
-#include <stdint.h>
 
 int main(int argc, char *argv[]) {
 
-  if (argc != 3) {
-    fprintf(stderr, "Program must run with %s <file_name> <size>\n", argv[0]);
+  if (argc != 4) {
+    fprintf(stderr,
+            "Program must run with %s <file_name> <size> <spec>(M for Mb, K "
+            "for Kb)\n",
+            argv[0]);
     return 1;
   }
 
@@ -32,8 +36,12 @@ int main(int argc, char *argv[]) {
     printf("Can't create %s\n", argv[1]);
     return 1;
   }
-
-  uint32_t desired_size = 1024UL * 1024 * size;
+  uint32_t desired_size;
+  if (strcmp(argv[3], "K") == 0) {
+    desired_size = 1024UL * size;
+  } else if (strcmp(argv[3], "M") == 0) {
+    desired_size = 1024UL * 1024 * size;
+  }
 
   if (ftruncate(fileno(file), desired_size) != 0) {
     fprintf(stderr, "Error setting file size");
