@@ -1,55 +1,86 @@
 #include <cstdint>
-#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <iostream>
-
-// using namespace std;
+#include <vector>
 
 // Define FAT32 boot sector structure
 // NOTE: live it for now
 #pragma pack(push, 1)
 struct BootSector {
-  uint8_t jmpBoot[3];        // JMP instruction
-  char oemName[8];           // OEM name
-  uint16_t bytesPerSector;   // Bytes per sector
-  uint8_t sectorsPerCluster; // Sectors per cluster
-  uint16_t reservedSectors;  // Reserved sectors count
-  uint8_t numFATs;           // Number of FATs
-  uint16_t rootDirEntries;   // Number of root directory entries
-  uint16_t totalSectors16;   // Total sectors (16-bit)
-  uint8_t media;             // Media descriptor
-  uint16_t sectorsPerFAT16;  // Sectors per FAT (16-bit)
-  uint16_t sectorsPerTrack;  // Sectors per track
-  uint16_t numHeads;         // Number of heads
-  uint32_t hiddenSectors;    // Hidden sectors count
-  uint32_t totalSectors32;   // Total sectors (32-bit)
-  uint32_t sectorsPerFAT32;  // Sectors per FAT (32-bit)
-  uint16_t flags;            // Flags
-  uint16_t fsVersion;        // File system version
-  uint32_t rootCluster;      // Root directory cluster
-  uint16_t fsInfo;           // File system information sector
-  uint16_t backupBootSector; // Backup boot sector location
-  uint8_t reserved[12];      // Reserved
-  uint8_t driveNumber;       // Drive number
-  uint8_t reserved1;         // Reserved
-  uint8_t bootSig;           // Extended boot signature
-  uint32_t volumeID;         // Volume serial number
-  char volumeLabel[11];      // Volume label
-  char fsType[8];            // File system type
-  char bootCode[420];        // Boot code
-  uint16_t bootSignature;    // Boot sector signature
+  uint8_t jmp_boot[3];
+  char oem_name[8];
+  uint16_t bytes_per_sector;
+  uint8_t sectors_per_cluster;
+  uint16_t reserved_sectors;
+  uint8_t fat_copies;
+  uint16_t root_dir_entries;
+  uint16_t total_sectors_FAT16;
+  uint8_t media;
+  uint16_t sectors_per_FAT16;
+  uint16_t sectors_per_track;
+  uint16_t num_heads;
+  uint32_t hidden_sectors;
+  uint32_t total_sectors_FAT32;
+  uint32_t sectors_per_FAT32;
+  uint16_t flags;
+  uint16_t fs_version;
+  uint32_t root_cluster;
+  uint16_t fs_info;
+  uint16_t backup_boot_sector;
+  uint8_t reserved[12];
+  uint8_t drive_number;
+  uint8_t reserved1;
+  uint8_t extended_signature;
+  uint32_t volume_ID;
+  char volume_label[11];
+  char fs_type[8];
+  char boot_code[420];
+  uint16_t boot_signature;
+};
+
+struct BootSecMS {
+  uint8_t BS_jmpBoot[3];    // JMP instruction
+  char BS_OEMName[8];       // OEM name
+  uint16_t BPB_BytsPerSec;  // Bytes per sector
+  uint8_t BPB_SecPerClus;   // Sectors per cluster
+  uint16_t BPB_RsvdSecCnt;  // Reserved sectors count
+  uint8_t BPB_NumFATs;      // Number of FATs
+  uint16_t BPB_RootEntCnt;  // Number of root directory entries
+  uint16_t BPB_TotSec16;    // Total sectors (16-bit)
+  uint8_t BPB_Media;        // Media descriptor
+  uint16_t BPB_FATSz16;     // Sectors per FAT (16-bit)
+  uint16_t BPB_SecPerTrk;   // Sectors per track
+  uint16_t BPB_NumHeads;    // Number of heads
+  uint32_t BPB_HiddSec;     // Hidden sectors count
+  uint32_t BPB_TotSec32;    // Total sectors (32-bit)
+  uint32_t BPB_FATSz32;     // Sectors per FAT (32-bit)
+  uint16_t BPB_ExtFlags;    // Flags
+  uint16_t BPB_FSVer;       // File system version
+  uint32_t BPB_RootClus;    // Root directory cluster
+  uint16_t BPB_FSInfo;      // File system information sector
+  uint16_t BPB_BkBootSec;   // Backup boot sector location
+  uint8_t BPB_Reserved[12]; // Reserved
+  uint8_t BS_DrvNum;        // Drive number
+  uint8_t BS_Reserved1;     // Reserved
+  uint8_t BS_BootSig;       // Extended boot signature
+  uint32_t BS_VOlId;        // Volume serial number
+  char BS_VOlLab[11];       // Volume label
+  char BS_FilSysType[8];    // File system type
+  char BS_BootCode[420];    // Boot code (420 chars set to 0x00)
+  uint16_t Signature_word;  // 0x55 and 0xAA // Boot sector signature
+  // all remainig bytes set to 0x00 (only for media where BPB_BytsPerSec > 512)
 };
 #pragma pack(pop)
 
 int main(int argc, char **argv) {
 
-  if (argc != 2) {
-    std::cerr << "Program usage is " << argv[0] << " <size>(in Mb)\n";
+  if (argc != 3) {
+    std::cerr << "Program usage is " << argv[0] << " <size>(in Mb) <name>\n";
     return 1;
   }
   // Define disk image file name
-  long size = std::atol(argv[1]);
+  int64_t size = std::atol(argv[1]);
   if (size < 1) {
     std::cerr << "Error: size must be greater than 1\n";
     return 1;
@@ -58,81 +89,87 @@ int main(int argc, char **argv) {
     std::cerr << "Error: size must be smaller than 2'000'000\n";
     return 1;
   }
+  const char *disk_name = argv[2];
 
-  std::string diskImageFileName = "my_disk.img";
-
-  int diskSize = size * 1024 * 1024;
+  const uint64_t disk_size = 1024ULL * 1024 * size;
 
   // Create a new file stream for writing the disk image
-  std::ofstream diskImage(diskImageFileName, std::ios::binary);
+  std::ofstream disk_image(disk_name, std::ios::binary | std::ios::trunc);
 
   // Check if the file stream is open
-  if (!diskImage.is_open()) {
+  if (!disk_image.is_open()) {
     std::cerr << "Error: Unable to create FAT32 disk image\n";
     return 1; // Return error code
   }
 
   // Initialize boot sector structure
-  BootSector bootSector;
-  std::memset(&bootSector, 0, sizeof(BootSector));
+  BootSector boot_sector;
+  std::memset(&boot_sector, 0, sizeof(BootSector));
 
   // Fill boot sector fields
-  bootSector.bytesPerSector = 512;
-  bootSector.sectorsPerCluster = 4;
-  bootSector.reservedSectors = 1;
-  bootSector.numFATs = 2;
-  bootSector.rootDirEntries = 512;
-  bootSector.totalSectors16 = 0;
-  bootSector.media = 0xF8;
-  bootSector.sectorsPerFAT16 = 0;
-  bootSector.sectorsPerTrack = 32;
-  bootSector.numHeads = 2;
-  bootSector.hiddenSectors = 0;
-  bootSector.totalSectors32 = diskSize / bootSector.bytesPerSector;
-  bootSector.sectorsPerFAT32 = 10;
-  bootSector.flags = 0;
-  bootSector.fsVersion = 0;
-  bootSector.rootCluster = 2;
-  bootSector.fsInfo = 1;
-  bootSector.backupBootSector = 6;
-  bootSector.driveNumber = 0x80;
-  bootSector.bootSig = 0x29;
-  bootSector.volumeID = 12345678;
-  strncpy(bootSector.volumeLabel, "MY_DISK", sizeof(bootSector.volumeLabel));
-  strncpy(bootSector.fsType, "FAT32", sizeof(bootSector.fsType));
-  bootSector.bootSignature = 0xAA55;
+  std::memcpy(boot_sector.jmp_boot, "\xEB\xFF\x90", 3);
+  std::memcpy(boot_sector.oem_name, "MYOSNAME", 8);
+  std::memcpy(boot_sector.fs_type, "FAT32   ", 8);
+  std::memcpy(boot_sector.volume_label, "MYVOLUME  ", 11);
+  boot_sector.bytes_per_sector = 512;
+  boot_sector.sectors_per_cluster = 8;
+  boot_sector.reserved_sectors = 32;
+  boot_sector.fat_copies = 2;
+  boot_sector.root_dir_entries = 512;
+  boot_sector.total_sectors_FAT16 = 0;
+  boot_sector.media = 0xF8;
+  boot_sector.sectors_per_FAT16 = 0;
+  boot_sector.sectors_per_track = 0x13;
+  boot_sector.num_heads = 2;
+  boot_sector.hidden_sectors = 0;
+  boot_sector.total_sectors_FAT32 = disk_size / boot_sector.bytes_per_sector;
+  boot_sector.sectors_per_FAT32 = 10;
+  boot_sector.flags = 0;
+  boot_sector.fs_version = 0;
+  boot_sector.root_cluster = 2;
+  boot_sector.fs_info = 1;
+  boot_sector.backup_boot_sector = 6;
+  boot_sector.drive_number = 0x80;
+  boot_sector.extended_signature = 0x29;
+  boot_sector.volume_ID = 12345678;
+  boot_sector.boot_signature = 0xAA55;
 
   // Write boot sector to disk image
-  diskImage.write(reinterpret_cast<char *>(&bootSector), sizeof(BootSector));
-  const uint32_t data_sectors = boot_sector.total_sectors - RESERVED_SECTORS -
-                                (ROOT_ENTRIES * 32 / BYTES_PER_SECTOR) -
-                                (FAT_COPIES * boot_sector.total_sectors / 200);
-  const uint32_t total_clusters = data_sectors / SECTORS_PER_CLUSTER;
-  std::vector<FatEntry> fat(total_clusters + 2);
-  fat[0].value = 0x0FFFFFF8;
-  fat[1].value = 0x0FFFFFFF;
+  disk_image.write(reinterpret_cast<char *>(&boot_sector), sizeof(BootSector));
+
+  const uint32_t data_sectors =
+      boot_sector.total_sectors_FAT32 - boot_sector.reserved_sectors -
+      (boot_sector.root_dir_entries * 32 / boot_sector.bytes_per_sector) -
+      (boot_sector.fat_copies * boot_sector.total_sectors_FAT32 / 200);
+  const uint32_t total_clusters =
+      data_sectors / boot_sector.sectors_per_cluster;
+
+  std::vector<uint32_t> fat(total_clusters + 2);
+  fat[0] = 0x0FFFFFF8;
+  fat[1] = 0x0FFFFFFF;
   for (uint32_t i = 2; i < total_clusters + 2; ++i) {
-    fat[i].value = 0;
+    fat[i] = 0;
   }
 
-  for (uint32_t i = 0; i < FAT_COPIES; ++i) {
-    file.seekp(RESERVED_SECTORS * BYTES_PER_SECTOR +
-               i * (total_clusters + 2) * sizeof(FatEntry));
-    file.write(reinterpret_cast<char *>(fat.data()),
-               (total_clusters + 2) * sizeof(FatEntry));
+  for (uint32_t i = 0; i < boot_sector.fat_copies; ++i) {
+    disk_image.seekp(boot_sector.reserved_sectors *
+                         boot_sector.bytes_per_sector +
+                     i * (total_clusters + 2) * sizeof(uint32_t));
+    disk_image.write(reinterpret_cast<char *>(fat.data()),
+                     (total_clusters + 2) * sizeof(uint32_t));
   }
 
-  file.seekp(RESERVED_SECTORS * BYTES_PER_SECTOR +
-             FAT_COPIES * (total_clusters + 2) * sizeof(FatEntry));
-  std::vector<uint8_t> root_dir(ROOT_ENTRIES * 32, 0);
-  file.write(reinterpret_cast<char *>(root_dir.data()), root_dir.size());
+  disk_image.seekp(boot_sector.reserved_sectors * boot_sector.bytes_per_sector +
+                   boot_sector.fat_copies * (total_clusters + 2) *
+                       sizeof(uint32_t));
+  std::vector<uint8_t> root_dir(boot_sector.root_dir_entries * 32, 0);
+  disk_image.write(reinterpret_cast<char *>(root_dir.data()), root_dir.size());
 
   // Close the file stream
-  diskImage.close();
+  disk_image.close();
 
   // Output success message
-  std::cout << "FAT32 disk image created successfully: " << diskImageFileName
-            << "\n";
+  std::cout << "FAT32 disk image created successfully: " << disk_name << "\n";
 
   return 0; // Return success
 }
