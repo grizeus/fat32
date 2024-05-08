@@ -1,3 +1,4 @@
+#include <cstdint>
 #include <fstream>
 #include <iomanip>
 #include <ios>
@@ -22,10 +23,16 @@ int main(int argc, char **argv) {
     std::cerr << "Unable to open file";
     return 1;
   }
-
+  uint8_t count = 0;
   while (file.get(byte)) {
     out_file << std::hex << std::setw(2) << std::setfill('0')
              << (int)(unsigned char)byte << " ";
+    if (count < 58)
+      ++count;
+    else {
+      out_file << "\n";
+      count = 0;
+    }
   }
   out_file << "\n";
   out_file.close();
