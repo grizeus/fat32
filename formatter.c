@@ -97,6 +97,7 @@ int format_disk(const char *filename) {
   boot_sec->BPB_TotSec32 = disksize / boot_sec->BPB_BytsPerSec;
 
   // calculate FAT size
+  // FIX: this need to repair
   uint32_t RootDirSectors =
       ((boot_sec->BPB_RootEntCnt * 32) + (boot_sec->BPB_BytsPerSec - 1)) /
       boot_sec->BPB_BytsPerSec;
@@ -180,7 +181,8 @@ int format_disk(const char *filename) {
   printf("Disksize after reopen %d\n", disksize1);
   fclose(file);
   printf("Disk with id %u was formatted\n", boot_sec->BS_VOlId);
-
+  free(boot_sec);
+  free(fsinfo);
   return 0;
 }
 
