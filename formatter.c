@@ -47,6 +47,22 @@ static uint32_t code_volID(struct tm *time_info) {
 
   return VolID;
 }
+
+uint32_t get_FATSz32(BootSec_t *boot_sec) {
+
+  uint32_t FATElmSz = 4;
+  uint32_t FATSz32;
+
+  uint32_t TmpVal1 =
+      FATElmSz * (boot_sec->BPB_TotSec32 - boot_sec->BPB_RsvdSecCnt);
+  uint32_t TmpVal2 = (boot_sec->BPB_SecPerClus * BYTS_PER_SEC) +
+                     (FATElmSz * boot_sec->BPB_NumFATs);
+
+  FATSz32 = TmpVal1 / TmpVal2;
+  FATSz32 += 1; // round up
+
+  return FATSz32;
+}
 // write to file with error checking
 int write_check(const void *data, uint32_t offset, size_t data_size,
                 size_t count, FILE *file) {
@@ -81,7 +97,8 @@ int format_disk(const char *filename) {
   file = fopen(filename, "wb");
   // init boot sector
   BootSec_t *boot_sec = (BootSec_t *)malloc(sizeof(BootSec_t));
-  memcpy(boot_sec->BS_jmpBoot, "\xEB\xF8\x90", 3);
+
+  memcpy(boot_sec->BS_jmpBoot, "\xEB\x58\x90", 3);
   memcpy(boot_sec->BS_OEMName, "MYOSNAME", 8);
   boot_sec->BPB_BytsPerSec = 512;
   boot_sec->BPB_SecPerClus = 1;
@@ -96,17 +113,7 @@ int format_disk(const char *filename) {
   boot_sec->BPB_HiddSec = 0;
   boot_sec->BPB_TotSec32 = disksize / boot_sec->BPB_BytsPerSec;
 
-  // calculate FAT size
-  // FIX: this need to repair
-  uint32_t RootDirSectors =
-      ((boot_sec->BPB_RootEntCnt * 32) + (boot_sec->BPB_BytsPerSec - 1)) /
-      boot_sec->BPB_BytsPerSec;
-  uint32_t TmpVal1 = disksize - (boot_sec->BPB_RsvdSecCnt + RootDirSectors);
-  uint32_t TmpVal2 =
-      ((256 * boot_sec->BPB_SecPerClus) + boot_sec->BPB_NumFATs) / 2;
-  printf("rootdir %d tm1 %d tmp2 %d\n", RootDirSectors, TmpVal1, TmpVal2);
-  boot_sec->BPB_FATSz32 =
-      (TmpVal1 + (TmpVal2 - 1)) / TmpVal2; // NOTE: too big, need to ~1
+  boot_sec->BPB_FATSz32 = get_FATSz32(boot_sec);
   boot_sec->BPB_ExtFlags = 0;
   boot_sec->BPB_FSVer = NULL_BYTE;
   boot_sec->BPB_RootClus = 2;
@@ -131,31 +138,54 @@ int format_disk(const char *filename) {
   // init FSInfo
   FSInfo_t *fsinfo = (FSInfo_t *)malloc(sizeof(FSInfo_t));
   fsinfo->FSI_Leadsig = 0x41615252;
-  memset(fsinfo->FSI_Reserved1, NULL_BYTE, sizeof(fsinfo->FSI_Reserved1));
+  // memset(fsinfo->FSI_Reserved1, NULL_BYTE, sizeof(fsinfo->FSI_Reserved1));
   fsinfo->FSI_StructSig = 0x61417272;
-  fsinfo->FSI_FreeCount = 0xFFFFFFFF;
-  fsinfo->FSI_Nxt_Free = 2;
+  fsinfo->FSI_FreeCount = (uint32_t) -1; // 0xFFFFFFFF
+  fsinfo->FSI_Nxt_Free = (uint32_t) -1; // 0xFFFFFFFF
   fsinfo->FSI_Nxt_Free = 0xAA550000;
 
-  // write bootsec and FSInfo to file in two copy (og and backiup)
+
+  // write reserved FAT entries to file
+  uint32_t *rsrvd_fat_sec = (uint32_t *)malloc(BYTS_PER_SEC);
+  if (!rsrvd_fat_sec) {
+    fprintf(stderr, "Failed to allocate memory for FAT.\n");
+    free(boot_sec);
+    free(fsinfo);
+    fclose(file);
+    return -1;
+  }
+  memset(rsrvd_fat_sec, 0, BYTS_PER_SEC);
+
+  rsrvd_fat_sec[0] = 0x0FFFFFF8; // | (boot_sec->BPB_Media & 0xFF);
+  rsrvd_fat_sec[1] = 0x0FFFFFFF;
+  rsrvd_fat_sec[2] = 0x0FFFFFFF;
+
+  uint32_t user_area = boot_sec->BPB_TotSec32 - boot_sec->BPB_RsvdSecCnt - (boot_sec->BPB_NumFATs * boot_sec->BPB_FATSz32);
+  uint32_t cluster_count = user_area / boot_sec->BPB_SecPerClus;
+
+  fsinfo->FSI_FreeCount = (user_area/boot_sec->BPB_SecPerClus) - 1;
+  fsinfo->FSI_Nxt_Free = 3;
+
+  // write bootsec and FSInfo to file in two copy (og and backup)
   for (size_t i = 0; i < 2; ++i) {
     uint16_t start = (i == 0) ? 0 : boot_sec->BPB_BkBootSec;
-    if (write_check(boot_sec, start * BYTS_PER_SEC, sizeof(*boot_sec), 1,
+    if (write_check(boot_sec, start * BYTS_PER_SEC, BYTS_PER_SEC, 1,
                     file) == -1) {
       return -1;
     }
-    if (write_check(fsinfo, (start + boot_sec->BPB_FSInfo) * BYTS_PER_SEC,
-                    sizeof(*fsinfo), 1, file) == -1) {
+    if (write_check(fsinfo, ((start + 1) + boot_sec->BPB_FSInfo) * BYTS_PER_SEC,
+                    BYTS_PER_SEC, 1, file) == -1) {
       return -1;
     }
   }
 
-  // write reserved FAT entries to file
-  uint32_t fat[3] = {0x0FFFFFF8, 0x0FFFFFFF, 0x0FFFFFFF};
-
   for (size_t i = 0; i < boot_sec->BPB_NumFATs; ++i) {
-    uint16_t start = boot_sec->BPB_RsvdSecCnt + (i + boot_sec->BPB_FATSz32);
-    if (write_check(&fat, start, sizeof(fat), 1, file) == -1) {
+    uint16_t start = boot_sec->BPB_RsvdSecCnt + (i * boot_sec->BPB_FATSz32);
+    if (write_check(rsrvd_fat_sec, start * BYTS_PER_SEC, BYTS_PER_SEC, 1, file) == -1) {
+      free(boot_sec);
+      free(fsinfo);
+      free(rsrvd_fat_sec);
+      fclose(file);
       return -1;
     }
   }
@@ -168,24 +198,19 @@ int format_disk(const char *filename) {
   }
 
   fclose(file);
-
-  file = fopen(filename, "r");
-  if (!file) {
-    fprintf(stderr, "File open failed %d: %s.\n", errno, strerror(errno));
-    fclose(file);
-    return -1;
-  }
-
-  fseek(file, 0, SEEK_END);
-  uint32_t disksize1 = ftell(file);
-  printf("Disksize after reopen %d\n", disksize1);
-  fclose(file);
   printf("Disk with id %u was formatted\n", boot_sec->BS_VOlId);
+
   free(boot_sec);
   free(fsinfo);
   return 0;
 }
 
 int main(int argc, char *argv[]) {
+
+  if (argc != 2) {
+    fprintf(stderr, "Usage: %s <disk_image>\n", argv[0]);
+    return 1;
+  }
+
   return format_disk(argv[1]);
 }
