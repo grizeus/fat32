@@ -38,9 +38,9 @@ int main(int argc, char *argv[]) {
   }
   uint32_t desired_size;
   if (strcmp(argv[3], "K") == 0) {
-    desired_size = 1024UL * size;
+    desired_size = 1000UL * size;
   } else if (strcmp(argv[3], "M") == 0) {
-    desired_size = 1024UL * 1024 * size;
+    desired_size = 1000UL * 1000 * size;
   }
 
   if (ftruncate(fileno(file), desired_size) != 0) {
