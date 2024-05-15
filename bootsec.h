@@ -2,9 +2,10 @@
 #define BOOT_SECTOR_H
 
 #include <stdint.h>
+
 typedef struct BootSec {
   uint8_t BS_jmpBoot[3];     // JMP instruction
-  char BS_OEMName[8];        // OEM name
+  uint8_t BS_OEMName[8];     // OEM name
   uint16_t BPB_BytsPerSec;   // Bytes per sector
   uint8_t BPB_SecPerClus;    // Sectors per cluster
   uint16_t BPB_RsvdSecCnt;   // Reserved sectors count
@@ -28,12 +29,11 @@ typedef struct BootSec {
   uint8_t BS_Reserved1;      // Reserved
   uint8_t BS_BootSig;        // Extended boot signature
   uint32_t BS_VOlId;         // Volume serial number
-  char BS_VOlLab[11];        // Volume label
-  char BS_FilSysType[8];     // File system type
-  uint8_t BS_BootCode[420];     // Boot code (420 chars set to 0x00)
+  uint8_t BS_VOlLab[11];     // Volume label
+  uint8_t BS_FilSysType[8];  // File system type
+  uint8_t BS_BootCode[420];  // Boot code (420 chars set to 0x00)
   uint8_t Signature_word[2]; // 0x55 and 0xAA // Boot sector signature
   // all remainig bytes set to 0x00 (only for media where BPB_BytsPerSec > 512)
 } __attribute__((packed, aligned(1))) BootSec_t;
 
-void printBootSector(const BootSec_t *bootSector);
 #endif // BOOT_SECTOR_H
