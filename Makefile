@@ -1,3 +1,4 @@
 make:
-	gcc -g -o format formatter.c bootsec.c
-	gcc -g -o creader reader.c bootsec.c
+	gcc -g -o format formatter.c
+	gcc -g -o create creator.c
+	gcc -g -o reader reader.c
