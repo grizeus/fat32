@@ -4,3 +4,4 @@
 *.img
 .vscode
 !Makefile
+build
