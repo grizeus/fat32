@@ -1,12 +1,11 @@
+#include "bootsec.h"
+#include "directory.h"
 #include <ctype.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-
-#include "bootsec.h"
-#include "directory.h"
 
 #define BYTS_PER_SEC 512
 #define MAX_LFN_ENTRIES 20
@@ -80,18 +79,43 @@ void read_boot_sector(FILE *disk, BootSec_t *boot_sec) {
   fread(boot_sec, sizeof(BootSec_t), 1, disk);
 }
 
-static void calculate_sector(FILE *disk, BootSec_t *boot_sec, uint32_t cluster) {
-    uint32_t sector = boot_sec->BPB_RsvdSecCnt +
-                      (boot_sec->BPB_NumFATs * boot_sec->BPB_FATSz32);
-    sector += (cluster - 2) * boot_sec->BPB_SecPerClus;
-    fseek(disk, sector * BYTS_PER_SEC, SEEK_SET);
-}
-
-void list_dir(FILE *disk, BootSec_t *boot_sec, uint32_t cluster) {
+static void calculate_sector(FILE *disk, BootSec_t *boot_sec,
+                             uint32_t cluster) {
   uint32_t sector = boot_sec->BPB_RsvdSecCnt +
                     (boot_sec->BPB_NumFATs * boot_sec->BPB_FATSz32);
   sector += (cluster - 2) * boot_sec->BPB_SecPerClus;
   fseek(disk, sector * BYTS_PER_SEC, SEEK_SET);
+}
+static void process_dir_entry(DIRStr_t *dir_entry, char *name, char *ext) {
+  strncpy(name, (char *)dir_entry->DIR_Name, 8);
+  name[8] = '\0';
+
+  strncpy(ext, (char *)dir_entry->DIR_Name + 8, 3);
+  ext[3] = '\0';
+
+  // remove trailing spaces in name and ext
+  for (int i = 7; i >= 0 && name[i] == ' '; i--)
+    name[i] = '\0';
+
+  for (int i = 2; i >= 0 && ext[i] == ' '; i--)
+    ext[i] = '\0';
+
+  // "fix" true-case name
+  if (dir_entry->DIR_NTRes & NT_RES_LOWER_CASE_BASE) {
+    for (int i = 0; name[i]; i++) {
+      name[i] = tolower(name[i]);
+    }
+  }
+
+  if (dir_entry->DIR_NTRes & NT_RES_LOWER_CASE_EXT) {
+    for (int i = 0; ext[i]; i++) {
+      ext[i] = tolower(ext[i]);
+    }
+  }
+}
+void list_dir(FILE *disk, BootSec_t *boot_sec, uint32_t cluster) {
+
+  calculate_sector(disk, boot_sec, cluster);
 
   DIRStr_t dir_entry;
   uint32_t file_count = 0;
@@ -103,7 +127,7 @@ void list_dir(FILE *disk, BootSec_t *boot_sec, uint32_t cluster) {
   uint8_t lfn_chunk_counter = 0;
   entry_store_t *entries = malloc(MAX_DIR_ENTRIES * sizeof(entry_store_t));
   if (!entries) {
-    fprintf(stderr, "Failed with allocate memory for entries\n");
+    fprintf(stderr, "Failed with allocate memory\n");
     exit(EXIT_FAILURE);
   }
 
@@ -111,6 +135,7 @@ void list_dir(FILE *disk, BootSec_t *boot_sec, uint32_t cluster) {
     if (dir_entry.DIR_Name[0] == 0) {
       break; // No more entries
     }
+
     if ((dir_entry.DIR_Attr & ATTR_LFN) == ATTR_LFN) {
 
       LFNStr_t *lfn_entry = (LFNStr_t *)&dir_entry;
@@ -131,8 +156,8 @@ void list_dir(FILE *disk, BootSec_t *boot_sec, uint32_t cluster) {
       }
       char *lfn_part = malloc(sizeof(lfn_buf) + 1);
       if (!lfn_part) {
-        perror("malloc");
-        exit(1);
+        fprintf(stderr, "Failed with allocate memory\n");
+        exit(EXIT_FAILURE);
       }
 
       strcpy(lfn_part, lfn_buf);
@@ -148,31 +173,9 @@ void list_dir(FILE *disk, BootSec_t *boot_sec, uint32_t cluster) {
       lfn_chunk_counter = 0;
     }
 
-    char name[9];
-    char ext[4];
-    strncpy(name, (char *)dir_entry.DIR_Name, 8);
-    name[8] = '\0';
-    strncpy(ext, (char *)dir_entry.DIR_Name + 8, 3);
-    ext[3] = '\0';
+    char name[9], ext[4];
+    process_dir_entry(&dir_entry, name, ext);
 
-    // remove triling spaces in name and ext
-    for (int i = 7; i >= 0 && name[i] == ' '; i--)
-      name[i] = '\0';
-    for (int i = 2; i >= 0 && ext[i] == ' '; i--)
-      ext[i] = '\0';
-
-    // "fix" true-case name
-    if (dir_entry.DIR_NTRes & NT_RES_LOWER_CASE_BASE) {
-      for (int i = 0; name[i]; i++) {
-        name[i] = tolower(name[i]);
-      }
-    }
-
-    if (dir_entry.DIR_NTRes & NT_RES_LOWER_CASE_EXT) {
-      for (int i = 0; ext[i]; i++) {
-        ext[i] = tolower(ext[i]);
-      }
-    }
     if (file_count < MAX_DIR_ENTRIES) {
       if (lfn_name) {
         strcpy(entries[file_count].name, lfn_name);
@@ -180,14 +183,21 @@ void list_dir(FILE *disk, BootSec_t *boot_sec, uint32_t cluster) {
         lfn_name = NULL;
         ++file_count;
       } else {
-        strcpy(entries[file_count].name, name);
-        ++file_count;
+        if (ext[0] != '\0') {
+          char final_name[13];
+          snprintf(final_name, 12, "%s.%s", name, ext);
+          strcpy(entries[file_count].name, final_name);
+          ++file_count;
+        } else {
+          strcpy(entries[file_count].name, name);
+          ++file_count;
+        }
       }
     }
   }
 
   qsort(entries, file_count, sizeof(entry_store_t), entries_compare);
-
+  printf(".  ..  ");
   for (size_t i = 0; i < file_count; ++i) {
     printf("%s  ", entries[i].name);
   }
@@ -198,10 +208,8 @@ void list_dir(FILE *disk, BootSec_t *boot_sec, uint32_t cluster) {
 }
 
 void list_dir_long(FILE *disk, BootSec_t *boot_sec, uint32_t cluster) {
-  uint32_t sector = boot_sec->BPB_RsvdSecCnt +
-                    (boot_sec->BPB_NumFATs * boot_sec->BPB_FATSz32);
-  sector += (cluster - 2) * boot_sec->BPB_SecPerClus;
-  fseek(disk, sector * BYTS_PER_SEC, SEEK_SET);
+
+  calculate_sector(disk, boot_sec, cluster);
 
   DIRStr_t dir_entry;
   uint32_t byts_in_use = 0;
@@ -256,31 +264,8 @@ void list_dir_long(FILE *disk, BootSec_t *boot_sec, uint32_t cluster) {
       lfn_chunk_counter = 0;
     }
 
-    char name[9];
-    char ext[4];
-    strncpy(name, (char *)dir_entry.DIR_Name, 8);
-    name[8] = '\0';
-    strncpy(ext, (char *)dir_entry.DIR_Name + 8, 3);
-    ext[3] = '\0';
-
-    // remove triling spaces in name and ext
-    for (int i = 7; i >= 0 && name[i] == ' '; i--)
-      name[i] = '\0';
-    for (int i = 2; i >= 0 && ext[i] == ' '; i--)
-      ext[i] = '\0';
-
-    // "fix" true-case name
-    if (dir_entry.DIR_NTRes & NT_RES_LOWER_CASE_BASE) {
-      for (int i = 0; name[i]; i++) {
-        name[i] = tolower(name[i]);
-      }
-    }
-
-    if (dir_entry.DIR_NTRes & NT_RES_LOWER_CASE_EXT) {
-      for (int i = 0; ext[i]; i++) {
-        ext[i] = tolower(ext[i]);
-      }
-    }
+    char name[9], ext[4];
+    process_dir_entry(&dir_entry, name, ext);
 
     // Convert date and time
     uint16_t date = dir_entry.DIR_CrtDate;
@@ -338,7 +323,7 @@ void list_dir_long(FILE *disk, BootSec_t *boot_sec, uint32_t cluster) {
   printf("%36s bytes free\n", formatted_free_byts);
 }
 
-int main(int argc, char *argv[]) {
+int main(int argc, char **argv) {
   if (argc != 2) {
     fprintf(stderr, "Usage: %s <disk_image>\n", argv[0]);
     return 1;
