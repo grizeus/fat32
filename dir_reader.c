@@ -1,11 +1,12 @@
-#include "bootsec.h"
-#include "directory.h"
 #include <ctype.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+#include "bootsec.h"
+#include "directory.h"
 
 #define BYTS_PER_SEC 512
 #define MAX_LFN_ENTRIES 20
@@ -81,11 +82,13 @@ void read_boot_sector(FILE *disk, BootSec_t *boot_sec) {
 
 static void calculate_sector(FILE *disk, BootSec_t *boot_sec,
                              uint32_t cluster) {
+  uint32_t fat_size = (boot_sec->BPB_FATSz32 == 0) ? boot_sec->BPB_FATSz16 : boot_sec->BPB_FATSz32;
   uint32_t sector = boot_sec->BPB_RsvdSecCnt +
-                    (boot_sec->BPB_NumFATs * boot_sec->BPB_FATSz32);
+                    (boot_sec->BPB_NumFATs * fat_size);
   sector += (cluster - 2) * boot_sec->BPB_SecPerClus;
   fseek(disk, sector * BYTS_PER_SEC, SEEK_SET);
 }
+
 static void process_dir_entry(DIRStr_t *dir_entry, char *name, char *ext) {
   strncpy(name, (char *)dir_entry->DIR_Name, 8);
   name[8] = '\0';
@@ -113,12 +116,13 @@ static void process_dir_entry(DIRStr_t *dir_entry, char *name, char *ext) {
     }
   }
 }
+
 void list_dir(FILE *disk, BootSec_t *boot_sec, uint32_t cluster) {
 
   calculate_sector(disk, boot_sec, cluster);
 
   DIRStr_t dir_entry;
-  uint32_t file_count = 0;
+  uint32_t entry_count = 0;
   char lfn_buffer[256] = {0};
   int lfn_index = 0;
 
@@ -176,29 +180,29 @@ void list_dir(FILE *disk, BootSec_t *boot_sec, uint32_t cluster) {
     char name[9], ext[4];
     process_dir_entry(&dir_entry, name, ext);
 
-    if (file_count < MAX_DIR_ENTRIES) {
+    if (entry_count < MAX_DIR_ENTRIES) {
       if (lfn_name) {
-        strcpy(entries[file_count].name, lfn_name);
+        strcpy(entries[entry_count].name, lfn_name);
         free(lfn_name);
         lfn_name = NULL;
-        ++file_count;
+        ++entry_count;
       } else {
         if (ext[0] != '\0') {
           char final_name[13];
           snprintf(final_name, 12, "%s.%s", name, ext);
-          strcpy(entries[file_count].name, final_name);
-          ++file_count;
+          strcpy(entries[entry_count].name, final_name);
+          ++entry_count;
         } else {
-          strcpy(entries[file_count].name, name);
-          ++file_count;
+          strcpy(entries[entry_count].name, name);
+          ++entry_count;
         }
       }
     }
   }
 
-  qsort(entries, file_count, sizeof(entry_store_t), entries_compare);
+  qsort(entries, entry_count, sizeof(entry_store_t), entries_compare);
   printf(".  ..  ");
-  for (size_t i = 0; i < file_count; ++i) {
+  for (size_t i = 0; i < entry_count; ++i) {
     printf("%s  ", entries[i].name);
   }
 
@@ -214,7 +218,7 @@ void list_dir_long(FILE *disk, BootSec_t *boot_sec, uint32_t cluster) {
   DIRStr_t dir_entry;
   uint32_t byts_in_use = 0;
   uint32_t actual_files_size = 0;
-  uint32_t file_count = 0;
+  uint32_t entry_count = 0;
 
   char *lfn_name = NULL;
   char *lfn_chunks[MAX_LFN_ENTRIES] = {0};
@@ -251,8 +255,8 @@ void list_dir_long(FILE *disk, BootSec_t *boot_sec, uint32_t cluster) {
       }
       strcpy(lfn_part, lfn_buf);
       lfn_chunks[lfn_chunk_counter] = lfn_part;
-
       lfn_chunk_counter++;
+
       continue;
     }
 
@@ -305,11 +309,13 @@ void list_dir_long(FILE *disk, BootSec_t *boot_sec, uint32_t cluster) {
       }
       actual_files_size += file_size;
     }
-    file_count++;
+    entry_count++;
   }
 
-  uint32_t user_area = boot_sec->BPB_TotSec32 - boot_sec->BPB_RsvdSecCnt -
-                       (boot_sec->BPB_NumFATs * boot_sec->BPB_FATSz32);
+  uint32_t fat_size = (boot_sec->BPB_FATSz32 == 0) ? boot_sec->BPB_FATSz16 : boot_sec->BPB_FATSz32;
+  uint32_t tot_sec = (boot_sec->BPB_TotSec32 == 0) ? boot_sec->BPB_TotSec16 : boot_sec->BPB_TotSec32;
+  uint32_t user_area = tot_sec - boot_sec->BPB_RsvdSecCnt -
+                       (boot_sec->BPB_NumFATs * fat_size);
   uint32_t free_byts = ((user_area - 1) / boot_sec->BPB_SecPerClus) *
                        BYTS_PER_SEC; // initial free space
 
@@ -319,7 +325,7 @@ void list_dir_long(FILE *disk, BootSec_t *boot_sec, uint32_t cluster) {
   format_with_spaces(formatted_free_byts, free_byts);
   format_with_spaces(formatted_files_size, actual_files_size);
 
-  printf("%8u files %21s bytes\n", file_count, formatted_files_size);
+  printf("%8u files %21s bytes\n", entry_count, formatted_files_size);
   printf("%36s bytes free\n", formatted_free_byts);
 }
 
