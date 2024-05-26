@@ -8,7 +8,6 @@
 #include "bootsec.h"
 #include "directory.h"
 
-#define BYTS_PER_SEC 512
 #define MAX_LFN_ENTRIES 20
 #define MAX_MAME_LEN 255
 #define NT_RES_LOWER_CASE_BASE 0x08
@@ -17,7 +16,7 @@
 
 typedef struct {
   char name[MAX_MAME_LEN];
-} entry_store_t;
+} EntrSt_t;
 
 static void format_with_spaces(char *buffer, uint32_t num) {
   char temp[30];
@@ -41,8 +40,8 @@ static void format_with_spaces(char *buffer, uint32_t num) {
 
 static int entries_compare(const void *a, const void *b) {
 
-  const entry_store_t *entry_a = (const entry_store_t *)a;
-  const entry_store_t *entry_b = (const entry_store_t *)b;
+  const EntrSt_t *entry_a = (const EntrSt_t *)a;
+  const EntrSt_t *entry_b = (const EntrSt_t *)b;
 
   // skip leading dot
   const char *name_a =
@@ -82,11 +81,12 @@ void read_boot_sector(FILE *disk, BootSec_t *boot_sec) {
 
 static void calculate_sector(FILE *disk, BootSec_t *boot_sec,
                              uint32_t cluster) {
-  uint32_t fat_size = (boot_sec->BPB_FATSz32 == 0) ? boot_sec->BPB_FATSz16 : boot_sec->BPB_FATSz32;
-  uint32_t sector = boot_sec->BPB_RsvdSecCnt +
-                    (boot_sec->BPB_NumFATs * fat_size);
+  uint32_t fat_size = (boot_sec->BPB_FATSz32 == 0) ? boot_sec->BPB_FATSz16
+                                                   : boot_sec->BPB_FATSz32;
+  uint32_t sector =
+      boot_sec->BPB_RsvdSecCnt + (boot_sec->BPB_NumFATs * fat_size);
   sector += (cluster - 2) * boot_sec->BPB_SecPerClus;
-  fseek(disk, sector * BYTS_PER_SEC, SEEK_SET);
+  fseek(disk, sector * boot_sec->BPB_BytsPerSec, SEEK_SET);
 }
 
 static void process_dir_entry(DIRStr_t *dir_entry, char *name, char *ext) {
@@ -117,6 +117,36 @@ static void process_dir_entry(DIRStr_t *dir_entry, char *name, char *ext) {
   }
 }
 
+static void process_lfn_entry(DIRStr_t *dir_entry, char **lfn_chunks,
+                              uint8_t *lfn_chunk_counter) {
+
+  LFNStr_t *lfn_entry = (LFNStr_t *)dir_entry;
+
+  if (lfn_entry->LDIR_Ord & LAST_LONG_ENTRY) {
+    *lfn_chunk_counter = 0;
+  }
+
+  char lfn_buf[14] = {0};
+  for (int j = 0; j < 5; ++j) {
+    lfn_buf[j] = (char)lfn_entry->LDIR_Name1[j];
+  }
+  for (int j = 0; j < 6; ++j) {
+    lfn_buf[5 + j] = (char)lfn_entry->LDIR_Name2[j];
+  }
+  for (int j = 0; j < 2; ++j) {
+    lfn_buf[11 + j] = (char)lfn_entry->LDIR_Name3[j];
+  }
+  char *lfn_part = malloc(sizeof(lfn_buf) + 1);
+  if (!lfn_part) {
+    fprintf(stderr, "Failed with allocate memory\n");
+    exit(EXIT_FAILURE);
+  }
+
+  strcpy(lfn_part, lfn_buf);
+  lfn_chunks[*lfn_chunk_counter] = lfn_part;
+  *lfn_chunk_counter += 1;
+}
+
 void list_dir(FILE *disk, BootSec_t *boot_sec, uint32_t cluster) {
 
   calculate_sector(disk, boot_sec, cluster);
@@ -129,7 +159,8 @@ void list_dir(FILE *disk, BootSec_t *boot_sec, uint32_t cluster) {
   char *lfn_name = NULL;
   char *lfn_chunks[MAX_LFN_ENTRIES] = {0};
   uint8_t lfn_chunk_counter = 0;
-  entry_store_t *entries = malloc(MAX_DIR_ENTRIES * sizeof(entry_store_t));
+  EntrSt_t *entries = malloc(MAX_DIR_ENTRIES * sizeof(EntrSt_t));
+
   if (!entries) {
     fprintf(stderr, "Failed with allocate memory\n");
     exit(EXIT_FAILURE);
@@ -142,31 +173,7 @@ void list_dir(FILE *disk, BootSec_t *boot_sec, uint32_t cluster) {
 
     if ((dir_entry.DIR_Attr & ATTR_LFN) == ATTR_LFN) {
 
-      LFNStr_t *lfn_entry = (LFNStr_t *)&dir_entry;
-
-      if (lfn_entry->LDIR_Ord & LAST_LONG_ENTRY) {
-        lfn_chunk_counter = 0;
-      }
-
-      char lfn_buf[14] = {0};
-      for (int j = 0; j < 5; ++j) {
-        lfn_buf[j] = (char)lfn_entry->LDIR_Name1[j];
-      }
-      for (int j = 0; j < 6; ++j) {
-        lfn_buf[5 + j] = (char)lfn_entry->LDIR_Name2[j];
-      }
-      for (int j = 0; j < 2; ++j) {
-        lfn_buf[11 + j] = (char)lfn_entry->LDIR_Name3[j];
-      }
-      char *lfn_part = malloc(sizeof(lfn_buf) + 1);
-      if (!lfn_part) {
-        fprintf(stderr, "Failed with allocate memory\n");
-        exit(EXIT_FAILURE);
-      }
-
-      strcpy(lfn_part, lfn_buf);
-      lfn_chunks[lfn_chunk_counter] = lfn_part;
-      lfn_chunk_counter++;
+      process_lfn_entry(&dir_entry, lfn_chunks, &lfn_chunk_counter);
       continue;
     }
     if (lfn_chunk_counter > 0) {
@@ -182,6 +189,9 @@ void list_dir(FILE *disk, BootSec_t *boot_sec, uint32_t cluster) {
 
     if (entry_count < MAX_DIR_ENTRIES) {
       if (lfn_name) {
+        if (dir_entry.DIR_Attr & ATTR_DIRECTORY) {
+          strcat(lfn_name, "/");
+        }
         strcpy(entries[entry_count].name, lfn_name);
         free(lfn_name);
         lfn_name = NULL;
@@ -193,6 +203,9 @@ void list_dir(FILE *disk, BootSec_t *boot_sec, uint32_t cluster) {
           strcpy(entries[entry_count].name, final_name);
           ++entry_count;
         } else {
+          if (dir_entry.DIR_Attr & ATTR_DIRECTORY) {
+            strcat(name, "/");
+          }
           strcpy(entries[entry_count].name, name);
           ++entry_count;
         }
@@ -200,7 +213,7 @@ void list_dir(FILE *disk, BootSec_t *boot_sec, uint32_t cluster) {
     }
   }
 
-  qsort(entries, entry_count, sizeof(entry_store_t), entries_compare);
+  qsort(entries, entry_count, sizeof(EntrSt_t), entries_compare);
   printf(".  ..  ");
   for (size_t i = 0; i < entry_count; ++i) {
     printf("%s  ", entries[i].name);
@@ -232,31 +245,8 @@ void list_dir_long(FILE *disk, BootSec_t *boot_sec, uint32_t cluster) {
     }
 
     if ((dir_entry.DIR_Attr & ATTR_LFN) == ATTR_LFN) {
-      LFNStr_t *lfn_entry = (LFNStr_t *)&dir_entry;
 
-      if (lfn_entry->LDIR_Ord & LAST_LONG_ENTRY) {
-        lfn_chunk_counter = 0;
-      }
-
-      char lfn_buf[14] = {0};
-      for (int j = 0; j < 5; ++j) {
-        lfn_buf[j] = (char)lfn_entry->LDIR_Name1[j];
-      }
-      for (int j = 0; j < 6; ++j) {
-        lfn_buf[5 + j] = (char)lfn_entry->LDIR_Name2[j];
-      }
-      for (int j = 0; j < 2; ++j) {
-        lfn_buf[11 + j] = (char)lfn_entry->LDIR_Name3[j];
-      }
-      char *lfn_part = malloc(sizeof(lfn_buf) + 1);
-      if (!lfn_part) {
-        perror("malloc");
-        exit(1);
-      }
-      strcpy(lfn_part, lfn_buf);
-      lfn_chunks[lfn_chunk_counter] = lfn_part;
-      lfn_chunk_counter++;
-
+      process_lfn_entry(&dir_entry, lfn_chunks, &lfn_chunk_counter);
       continue;
     }
 
@@ -291,13 +281,13 @@ void list_dir_long(FILE *disk, BootSec_t *boot_sec, uint32_t cluster) {
     if (dir_entry.DIR_Attr & ATTR_DIRECTORY) {
       char dir_label[] = "<DIR>";
       printf("%-8s %-3s %19s %s\n", name, dir_label, date_str, time_str);
-      byts_in_use += boot_sec->BPB_SecPerClus * BYTS_PER_SEC;
+      byts_in_use += boot_sec->BPB_SecPerClus * boot_sec->BPB_BytsPerSec;
     } else {
       uint32_t file_size = dir_entry.DIR_FileSize;
-      uint32_t integer_part = file_size / BYTS_PER_SEC;
-      uint32_t float_part = file_size % BYTS_PER_SEC;
+      uint32_t integer_part = file_size / boot_sec->BPB_BytsPerSec;
+      uint32_t float_part = file_size % boot_sec->BPB_BytsPerSec;
       uint32_t sectors = (float_part == 0) ? integer_part : integer_part + 1;
-      byts_in_use += sectors * BYTS_PER_SEC;
+      byts_in_use += sectors * boot_sec->BPB_BytsPerSec;
       if (lfn_name) {
         printf("%-8s %-3s %10u %s %s %s\n", name, ext, file_size, date_str,
                time_str, lfn_name);
@@ -312,12 +302,14 @@ void list_dir_long(FILE *disk, BootSec_t *boot_sec, uint32_t cluster) {
     entry_count++;
   }
 
-  uint32_t fat_size = (boot_sec->BPB_FATSz32 == 0) ? boot_sec->BPB_FATSz16 : boot_sec->BPB_FATSz32;
-  uint32_t tot_sec = (boot_sec->BPB_TotSec32 == 0) ? boot_sec->BPB_TotSec16 : boot_sec->BPB_TotSec32;
-  uint32_t user_area = tot_sec - boot_sec->BPB_RsvdSecCnt -
-                       (boot_sec->BPB_NumFATs * fat_size);
+  uint32_t fat_size = (boot_sec->BPB_FATSz32 == 0) ? boot_sec->BPB_FATSz16
+                                                   : boot_sec->BPB_FATSz32;
+  uint32_t tot_sec = (boot_sec->BPB_TotSec32 == 0) ? boot_sec->BPB_TotSec16
+                                                   : boot_sec->BPB_TotSec32;
+  uint32_t user_area =
+      tot_sec - boot_sec->BPB_RsvdSecCnt - (boot_sec->BPB_NumFATs * fat_size);
   uint32_t free_byts = ((user_area - 1) / boot_sec->BPB_SecPerClus) *
-                       BYTS_PER_SEC; // initial free space
+                       boot_sec->BPB_BytsPerSec; // initial free space
 
   free_byts -= byts_in_use; // substract space occupied by files
   char formatted_free_byts[30];
@@ -330,12 +322,16 @@ void list_dir_long(FILE *disk, BootSec_t *boot_sec, uint32_t cluster) {
 }
 
 int main(int argc, char **argv) {
-  if (argc != 2) {
-    fprintf(stderr, "Usage: %s <disk_image>\n", argv[0]);
+  if (argc < 3) {
+    fprintf(stderr, "Usage: %s <disk_image> <command> <option>(optionally)\n",
+            argv[0]);
     return 1;
   }
+  const char *disk_name = argv[1];
+  const char *command = argv[2];
+  const char *option = (argc > 3) ? argv[3] : "";
 
-  FILE *disk = fopen(argv[1], "rb");
+  FILE *disk = fopen(disk_name, "rb");
   if (!disk) {
     perror("Failed to open disk image");
     return 1;
@@ -343,19 +339,27 @@ int main(int argc, char **argv) {
 
   BootSec_t boot_sec;
   read_boot_sector(disk, &boot_sec);
-  if (strncmp((char *)boot_sec.BS_VOlLab, "NO NAME    ", 11) == 0) {
-    printf("Volume in drive : has no label\n");
-  } else {
-    printf("Volume in drive : %s\n", boot_sec.BS_VOlLab);
-  }
-  uint32_t vol_id = boot_sec.BS_VOlId;
-  uint32_t higher_order = (vol_id >> 16) & 0xFFFF;
-  uint32_t lower_order = vol_id & 0xFFFF;
-  printf("Volume Serial Number is %04X-%04X\n", higher_order, lower_order);
+  if (strncmp(command, "ls", 2) == 0 && strncmp(option, "-l", 2) == 0) {
+    if (strncmp((char *)boot_sec.BS_VOlLab, "NO NAME    ", 11) == 0) {
+      printf("Volume in drive : has no label\n");
+    } else {
+      printf("Volume in drive : %s\n", boot_sec.BS_VOlLab);
+    }
+    uint32_t vol_id = boot_sec.BS_VOlId;
+    uint32_t higher_order = (vol_id >> 16) & 0xFFFF;
+    uint32_t lower_order = vol_id & 0xFFFF;
+    printf("Volume Serial Number is %04X-%04X\n", higher_order, lower_order);
 
-  list_dir_long(disk, &boot_sec, boot_sec.BPB_RootClus);
-  list_dir(disk, &boot_sec, boot_sec.BPB_RootClus);
+    list_dir_long(disk, &boot_sec, boot_sec.BPB_RootClus);
+  } else if (strncmp(command, "ls", 2) == 0) {
+
+    list_dir(disk, &boot_sec, boot_sec.BPB_RootClus);
+  } else {
+    fprintf(stderr, "Unknown command: %s\n", command);
+    fclose(disk);
+    exit(EXIT_FAILURE);
+  }
 
   fclose(disk);
-  return 0;
+  return EXIT_SUCCESS;
 }
