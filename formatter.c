@@ -28,13 +28,12 @@ static uint32_t code_volID(struct tm *time_info) {
 
 uint32_t get_FATSz32(BootSec_t *boot_sec) {
 
-  uint32_t fat_elem_size = 4; // 4 Bytes in uint32_t
   uint32_t fat_size32;
 
   uint32_t TmpVal1 =
-      fat_elem_size * (boot_sec->BPB_TotSec32 - boot_sec->BPB_RsvdSecCnt);
+      FAT_ELEM_SIZE * (boot_sec->BPB_TotSec32 - boot_sec->BPB_RsvdSecCnt);
   uint32_t TmpVal2 = (boot_sec->BPB_SecPerClus * BYTS_PER_SEC) +
-                     (fat_elem_size * NUM_FATS);
+                     (FAT_ELEM_SIZE * NUM_FATS);
 
   fat_size32 = TmpVal1 / TmpVal2;
   fat_size32 += 1; // round up

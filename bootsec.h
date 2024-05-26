@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 
+#define FAT_ELEM_SIZE  4 // 4 Bytes in uint32_t
 typedef struct BootSec {
   uint8_t BS_jmpBoot[3];     // JMP instruction
   uint8_t BS_OEMName[8];     // OEM name
