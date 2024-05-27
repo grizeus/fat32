@@ -12,6 +12,8 @@
 #define ATTR_ARCHIVE 0x20
 #define LAST_LONG_ENTRY 0x40
 #define EOC 0x0FFFFFF8 // end of cluster
+#define NT_RES_LOWER_CASE_BASE 0x08
+#define NT_RES_LOWER_CASE_EXT 0x10
 
 typedef struct DIRStr {
   uint8_t DIR_Name[11];

@@ -10,8 +10,6 @@
 
 #define MAX_LFN_ENTRIES 20
 #define MAX_MAME_LEN 255
-#define NT_RES_LOWER_CASE_BASE 0x08
-#define NT_RES_LOWER_CASE_EXT 0x10
 #define MAX_DIR_ENTRIES 1024
 
 typedef struct {
