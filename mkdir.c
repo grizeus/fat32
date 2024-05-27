@@ -26,78 +26,90 @@ static void get_fat_time_date(uint16_t *fat_date, uint16_t *fat_time,
   *fat_time_tenth = (uint8_t)((t % 1000) / 10);
 }
 
-void read_boot_sector(FILE *disk, BootSec_t *boot_sec) {
+static void read_boot_sector(FILE *disk, BootSec_t *boot_sec) {
   fseek(disk, 0, SEEK_SET);
   fread(boot_sec, sizeof(BootSec_t), 1, disk);
 }
 
-void read_sector(FILE *disk, uint32_t sector, uint8_t *buffer,
-                 BootSec_t *boot_sec) {
-  fseek(disk, sector * boot_sec->BPB_BytsPerSec, SEEK_SET);
-  fread(buffer, 1, boot_sec->BPB_BytsPerSec, disk);
+static void read_sector(FILE *disk, uint32_t sector, uint8_t *buffer,
+                        uint16_t sector_size) {
+  fseek(disk, sector * sector_size, SEEK_SET);
+  fread(buffer, 1, sector_size, disk);
 }
 
-void write_sector(FILE *disk, uint32_t sector, const uint8_t *buffer,
-                  BootSec_t *boot_sec) {
-  fseek(disk, sector * boot_sec->BPB_BytsPerSec, SEEK_SET);
-  fwrite(buffer, 1, boot_sec->BPB_BytsPerSec, disk);
+static void write_sector(FILE *disk, uint32_t sector, const uint8_t *buffer,
+                         uint16_t sector_size) {
+  fseek(disk, sector * sector_size, SEEK_SET);
+  fwrite(buffer, 1, sector_size, disk);
 }
 
-uint32_t get_next_cluster(FILE *disk, uint32_t cluster, BootSec_t *boot_sec) {
-  uint32_t fat_sector = boot_sec->BPB_RsvdSecCnt +
-                        (cluster * FAT_ELEM_SIZE) / boot_sec->BPB_BytsPerSec;
-  uint32_t offset = (cluster * FAT_ELEM_SIZE) % boot_sec->BPB_BytsPerSec;
-  uint8_t sector_buffer[boot_sec->BPB_BytsPerSec];
+static uint32_t get_next_cluster(FILE *disk, uint32_t cluster,
+                                 uint16_t sector_size, uint16_t rsrvd_sec) {
+  uint32_t fat_sector = rsrvd_sec + (cluster * FAT_ELEM_SIZE) / sector_size;
+  uint32_t offset = (cluster * FAT_ELEM_SIZE) % sector_size;
+  uint8_t *sector_buffer = malloc(sector_size);
+  if (sector_buffer == NULL) {
+    fprintf(stderr, "Memory allocation failed\n");
+    return 1;
+  }
 
-  read_sector(disk, fat_sector, sector_buffer, boot_sec);
-  return *((uint32_t *)(sector_buffer + offset)) & 0x0FFFFFFF;
+  read_sector(disk, fat_sector, sector_buffer, sector_size);
+  uint32_t next_clus = *((uint32_t *)(sector_buffer + offset)) & 0x0FFFFFFF;
+  free(sector_buffer);
+  return next_clus;
 }
 
-uint32_t get_free_cluster(FILE *disk, BootSec_t *boot_sec) {
+static uint32_t get_free_cluster(FILE *disk, BootSec_t *boot_sec) {
   for (uint32_t cluster = 2;
        cluster < (boot_sec->BPB_TotSec32 / boot_sec->BPB_SecPerClus);
        cluster++) {
-    if (get_next_cluster(disk, cluster, boot_sec) == 0) {
+    if (get_next_cluster(disk, cluster, boot_sec->BPB_BytsPerSec,
+                         boot_sec->BPB_RsvdSecCnt) == 0) {
       return cluster;
     }
   }
   return 0; // No free clusters
 }
 
-void update_fat(FILE *disk, uint32_t cluster, uint32_t value,
-                BootSec_t *boot_sec) {
-  uint16_t byts_per_sec = boot_sec->BPB_BytsPerSec;
-  uint32_t fat_sector =
-      boot_sec->BPB_RsvdSecCnt + (cluster * FAT_ELEM_SIZE) / byts_per_sec;
-  uint32_t offset = (cluster * FAT_ELEM_SIZE) % byts_per_sec;
-  uint8_t *sector_buffer = malloc(byts_per_sec);
-  if (sector_buffer == NULL) {
+static void update_fat(FILE *disk, uint32_t cluster, uint32_t value,
+                       uint16_t sector_size, uint16_t rsrvd_sec) {
+  uint32_t fat_sector = rsrvd_sec + (cluster * FAT_ELEM_SIZE) / sector_size;
+  uint32_t offset = (cluster * FAT_ELEM_SIZE) % sector_size;
+  uint8_t *sector_buffer = malloc(sector_size);
+  if (!sector_buffer) {
     fprintf(stderr, "Memory allocation failed\n");
     return;
   }
 
-  read_sector(disk, fat_sector, sector_buffer, boot_sec);
+  read_sector(disk, fat_sector, sector_buffer, sector_size);
   *((uint32_t *)(sector_buffer + offset)) = value; // cast new value to buffer
-  write_sector(disk, fat_sector, sector_buffer, boot_sec);
+  write_sector(disk, fat_sector, sector_buffer, sector_size);
   free(sector_buffer);
 }
 
-void clear_cluster(FILE *disk, uint32_t cluster, BootSec_t *boot_sec) {
-  uint8_t *buffer = malloc(boot_sec->BPB_BytsPerSec);
-  memset(buffer, 0, boot_sec->BPB_BytsPerSec);
+static void clear_cluster(FILE *disk, uint32_t cluster, BootSec_t *boot_sec) {
+
+  uint16_t sector_size = boot_sec->BPB_BytsPerSec;
+  uint8_t *buffer = malloc(sector_size);
+  if (!buffer) {
+    fprintf(stderr, "Memory allocation failed\n");
+    return;
+  }
+  memset(buffer, 0, sector_size);
   uint32_t first_sector = boot_sec->BPB_HiddSec + boot_sec->BPB_RsvdSecCnt +
                           (boot_sec->BPB_NumFATs * boot_sec->BPB_FATSz32) +
                           (cluster - 2) * boot_sec->BPB_SecPerClus;
   for (uint32_t i = 0; i < boot_sec->BPB_SecPerClus; i++) {
-    write_sector(disk, first_sector + i, buffer, boot_sec);
+    write_sector(disk, first_sector + i, buffer, sector_size);
   }
   free(buffer);
 }
 
-void create_directory_entry(FILE *disk, uint32_t parent_cluster,
-                            const char *dirname, uint32_t new_cluster,
-                            BootSec_t *boot_sec) {
+static void create_directory_entry(FILE *disk, uint32_t parent_cluster,
+                                   const char *dirname, uint32_t new_cluster,
+                                   BootSec_t *boot_sec) {
   uint16_t sector_size = boot_sec->BPB_BytsPerSec;
+  uint16_t rsrvd_sec = boot_sec->BPB_RsvdSecCnt;
   uint8_t *sector_buffer = malloc(sector_size);
   if (!sector_buffer) {
     fprintf(stderr, "Memory allocation failed\n");
@@ -113,12 +125,12 @@ void create_directory_entry(FILE *disk, uint32_t parent_cluster,
   get_fat_time_date(&fat_date, &fat_time, &fat_time_tenth);
 
   while (1) {
-    current_sector = boot_sec->BPB_HiddSec + boot_sec->BPB_RsvdSecCnt +
+    current_sector = boot_sec->BPB_HiddSec + rsrvd_sec +
                      (boot_sec->BPB_NumFATs * boot_sec->BPB_FATSz32) +
                      (current_cluster - 2) * boot_sec->BPB_SecPerClus;
     for (uint32_t i = 0; i < boot_sec->BPB_SecPerClus; i++) {
-      read_sector(disk, current_sector + i, sector_buffer, boot_sec);
-      for (uint32_t j = 0; j < sector_size; j += boot_sec->BPB_RsvdSecCnt) {
+      read_sector(disk, current_sector + i, sector_buffer, sector_size);
+      for (uint32_t j = 0; j < sector_size; j += rsrvd_sec) {
         dir_entry = (DIRStr_t *)(sector_buffer + j);
         if (dir_entry->DIR_Name[0] == 0x00 || dir_entry->DIR_Name[0] == 0xE5) {
           memset(dir_entry, 0, sizeof(DIRStr_t));
@@ -135,17 +147,18 @@ void create_directory_entry(FILE *disk, uint32_t parent_cluster,
           dir_entry->DIR_WrtTime = fat_time;    // Optional: Last write time
           dir_entry->DIR_WrtDate = fat_date;    // Optional: Last write date
 
-          write_sector(disk, current_sector + i, sector_buffer, boot_sec);
+          write_sector(disk, current_sector + i, sector_buffer, sector_size);
           free(sector_buffer);
           return;
         }
       }
     }
-    uint32_t next_cluster = get_next_cluster(disk, current_cluster, boot_sec);
+    uint32_t next_cluster =
+        get_next_cluster(disk, current_cluster, sector_size, rsrvd_sec);
     if (next_cluster >= EOC) {
       uint32_t new_cluster = get_free_cluster(disk, boot_sec);
-      update_fat(disk, current_cluster, new_cluster, boot_sec);
-      update_fat(disk, new_cluster, EOC, boot_sec);
+      update_fat(disk, current_cluster, new_cluster, sector_size, rsrvd_sec);
+      update_fat(disk, new_cluster, EOC, sector_size, rsrvd_sec);
       clear_cluster(disk, new_cluster, boot_sec);
       current_cluster = new_cluster;
     } else {
@@ -169,7 +182,8 @@ void mkdir(FILE *disk, const char *path) {
     exit(EXIT_FAILURE);
   }
 
-  update_fat(disk, new_cluster, EOC, &boot_sec);
+  update_fat(disk, new_cluster, EOC, boot_sec.BPB_BytsPerSec,
+             boot_sec.BPB_RsvdSecCnt);
   clear_cluster(disk, new_cluster, &boot_sec);
   create_directory_entry(disk, parent_cluster, dirname, new_cluster, &boot_sec);
 }
