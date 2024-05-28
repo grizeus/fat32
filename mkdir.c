@@ -10,9 +10,10 @@
 
 static int create_lfn_entries(const char *lfn, uint8_t *sector_buffer,
                               uint16_t sector_size);
-static void generate_short_name(const char *lfn, char *short_name,
+static void generate_short_name(const char *dir_name, char *short_name,
                                 uint8_t *nt_res);
 static uint8_t *generate_lfn_short_name(const char *lfn);
+
 static void get_fat_time_date(uint16_t *fat_date, uint16_t *fat_time,
                               uint8_t *fat_time_tenth) {
   time_t t = time(NULL);
@@ -141,7 +142,7 @@ static void create_directory_entry(FILE *disk, uint32_t parent_cluster,
           // Create LFN entries
           int lfn_entries = 0;
 
-          if (strlen(dirname) > 12) {
+          if (strlen(dirname) > 8) {
             lfn_entries =
                 create_lfn_entries(dirname, sector_buffer + j, sector_size);
             j += lfn_entries * sizeof(LFNStr_t);
@@ -185,10 +186,10 @@ static void create_directory_entry(FILE *disk, uint32_t parent_cluster,
   }
   free(sector_buffer);
 }
-static uint8_t lfn_checksum(const uint8_t *short_name) {
+static uint8_t lfn_checksum(const uint8_t *name) {
   uint8_t sum = 0;
   for (int i = 0; i < 11; i++) {
-    sum = ((sum & 1) ? 0x80 : 0) + (sum >> 1) + short_name[i];
+    sum = ((sum & 1) ? 0x80 : 0) + (sum >> 1) + name[i];
   }
   return sum;
 }
@@ -237,50 +238,33 @@ static int create_lfn_entries(const char *lfn, uint8_t *sector_buffer,
 
   return num_entries;
 }
+
 static uint8_t *generate_lfn_short_name(const char *lfn) {
   static char short_name[12];
   memset(short_name, ' ', 11);
   short_name[11] = '\0';
 
   int i;
-  for (i = 0; i < 6 && lfn[i] && lfn[i] != '.'; i++) {
+  for (i = 0; i < 6 && lfn[i]; i++) {
     short_name[i] = toupper(lfn[i]);
   }
   short_name[i++] = '~';
   short_name[i] = '1';
 
-  const char *ext = strrchr(lfn, '.');
-  if (ext) {
-    ext++;
-    for (int j = 0; j < 3 && ext[j]; j++) {
-      short_name[8 + j] = toupper(ext[j]);
-    }
-  }
-
   return (uint8_t *)short_name;
 }
-static void generate_short_name(const char *lfn, char *short_name,
+
+static void generate_short_name(const char *dir_name, char *short_name,
                                 uint8_t *nt_res) {
-  memset(short_name, ' ', 11);
+  memset(short_name, ' ', 8);
   *nt_res = 0;
 
   int i = 0, j = 0;
-  while (i < 8 && lfn[j] && lfn[j] != '.') {
-    if (islower(lfn[j])) {
+  while (i < 8 && dir_name[j]) {
+    if (islower(dir_name[j])) {
       *nt_res |= NT_RES_LOWER_CASE_BASE;
     }
-    short_name[i++] = toupper(lfn[j++]);
-  }
-
-  if (lfn[j] == '.') {
-    j++;
-  }
-
-  for (i = 8; i < 11 && lfn[j]; i++) {
-    if (islower(lfn[j])) {
-      *nt_res |= NT_RES_LOWER_CASE_EXT;
-    }
-    short_name[i] = toupper(lfn[j++]);
+    short_name[i++] = toupper(dir_name[j++]);
   }
 }
 // static void create_directory_entry(FILE *disk, uint32_t parent_cluster,
@@ -384,5 +368,7 @@ int main(int argc, char **argv) {
   }
 
   mkdir(disk, path);
+  fclose(disk);
+
   return EXIT_SUCCESS;
 }
