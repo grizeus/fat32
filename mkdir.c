@@ -93,16 +93,12 @@ static void clear_cluster(FILE *disk, uint32_t cluster, BootSec_t *boot_sec) {
   free(buffer);
 }
 
-void fill(const char *src, size_t src_size, uint16_t *dst, size_t dst_size) {
+void fill(const char *src, int8_t src_size, uint16_t *dst, size_t dst_size) {
   for (int i = 0; i < dst_size; i++) {
-    printf("src %s \n", src);
-    // if (src[i] == '\0') {
-    if (i >= src_size) {
+    if (i > src_size) {
       dst[i] = 0xFFFF;
-      puts("f");
     } else {
       dst[i] = (uint16_t)src[i];
-      puts("c");
     }
   }
 }
@@ -126,10 +122,22 @@ static int create_lfn_entries(const char *lfn, size_t lfn_len,
 
   for (int i = 0; i < num_entries; i++) {
     uint8_t entry_idx = num_entries - 1 - i;
-    uint8_t ord = num_entries - i;
     LFNStr_t *lfn_entry =
         (LFNStr_t *)(sector_buffer + entry_idx * sizeof(LFNStr_t));
     memset(lfn_entry, 0, sizeof(LFNStr_t));
+
+    int8_t src_size = 13;
+    const char *src_ptr = src + 13 * i;
+    if (i == num_entries - 1) {
+      src_size = lfn_len - 13 * (num_entries - 1);
+    }
+    fill(src_ptr, src_size, name1, 5);
+    fill(src_ptr + 5, src_size - 5, name2, 6);
+    fill(src_ptr + 11, src_size - 11, name3, 2);
+
+    memcpy(lfn_entry->LDIR_Name1, name1, sizeof(name1));
+    memcpy(lfn_entry->LDIR_Name2, name2, sizeof(name2));
+    memcpy(lfn_entry->LDIR_Name3, name3, sizeof(name3));
 
     lfn_entry->LDIR_Ord = i + 1;
     if (i == num_entries - 1) {
@@ -137,19 +145,6 @@ static int create_lfn_entries(const char *lfn, size_t lfn_len,
     }
     lfn_entry->LDIR_Attr = ATTR_LFN;
     lfn_entry->LDIR_Chksum = checksum;
-
-    size_t src_size = 13;
-    const char *src_ptr = src + 13 * i;
-    if (i == num_entries - 1) {
-      src_size = lfn_len - 13 * (num_entries - 1);
-    }
-    fill(src_ptr, src_size, name1, 5);
-    fill(src_ptr + 5, src_size, name2, 6);
-    fill(src_ptr + 11, src_size, name3, 2);
-
-    memcpy(lfn_entry->LDIR_Name1, name1, sizeof(name1));
-    memcpy(lfn_entry->LDIR_Name2, name2, sizeof(name2));
-    memcpy(lfn_entry->LDIR_Name3, name3, sizeof(name3));
   }
   printf("Created %d LFN entries for %s\n", num_entries, lfn);
   return num_entries;
