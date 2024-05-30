@@ -7,8 +7,6 @@
 #include <string.h>
 #include <time.h>
 
-static int create_lfn_entries(const char *lfn, uint8_t *sector_buffer,
-                              uint16_t sector_size);
 static void generate_short_name(const char *dir_name, char *short_name,
                                 uint8_t *nt_res);
 static uint8_t lfn_checksum(const uint8_t *name);
@@ -95,8 +93,70 @@ static void clear_cluster(FILE *disk, uint32_t cluster, BootSec_t *boot_sec) {
   free(buffer);
 }
 
+void fill(const char *src, size_t src_size, uint16_t *dst, size_t dst_size) {
+  for (int i = 0; i < dst_size; i++) {
+    printf("src %s \n", src);
+    // if (src[i] == '\0') {
+    if (i >= src_size) {
+      dst[i] = 0xFFFF;
+      puts("f");
+    } else {
+      dst[i] = (uint16_t)src[i];
+      puts("c");
+    }
+  }
+}
+
+static int create_lfn_entries(const char *lfn, size_t lfn_len,
+                              uint8_t *sector_buffer, uint16_t sector_size) {
+  int num_entries = (lfn_len + 12) / 13;
+
+  char short_name[11];
+  generate_lfn_short_name(lfn, short_name);
+  uint8_t checksum = lfn_checksum((uint8_t *)short_name);
+
+  uint16_t name1[5] = {0};
+  uint16_t name2[6] = {0};
+  uint16_t name3[2] = {0};
+
+  char src[num_entries * 13];
+  memset(src, '\0', num_entries * 13); // populate array with size of filled lfn
+                                       // entries with whitespaces
+  memcpy(src, lfn, lfn_len);
+
+  for (int i = 0; i < num_entries; i++) {
+    uint8_t entry_idx = num_entries - 1 - i;
+    uint8_t ord = num_entries - i;
+    LFNStr_t *lfn_entry =
+        (LFNStr_t *)(sector_buffer + entry_idx * sizeof(LFNStr_t));
+    memset(lfn_entry, 0, sizeof(LFNStr_t));
+
+    lfn_entry->LDIR_Ord = i + 1;
+    if (i == num_entries - 1) {
+      lfn_entry->LDIR_Ord |= LAST_LONG_ENTRY; // Set the last LFN entry bit
+    }
+    lfn_entry->LDIR_Attr = ATTR_LFN;
+    lfn_entry->LDIR_Chksum = checksum;
+
+    size_t src_size = 13;
+    const char *src_ptr = src + 13 * i;
+    if (i == num_entries - 1) {
+      src_size = lfn_len - 13 * (num_entries - 1);
+    }
+    fill(src_ptr, src_size, name1, 5);
+    fill(src_ptr + 5, src_size, name2, 6);
+    fill(src_ptr + 11, src_size, name3, 2);
+
+    memcpy(lfn_entry->LDIR_Name1, name1, sizeof(name1));
+    memcpy(lfn_entry->LDIR_Name2, name2, sizeof(name2));
+    memcpy(lfn_entry->LDIR_Name3, name3, sizeof(name3));
+  }
+  printf("Created %d LFN entries for %s\n", num_entries, lfn);
+  return num_entries;
+}
+
 static void create_directory_entry(FILE *disk, uint32_t parent_cluster,
-                                   const char *dirname, uint32_t new_cluster,
+                                   const char *dir_name, uint32_t new_cluster,
                                    BootSec_t *boot_sec) {
   uint16_t sector_size = boot_sec->BPB_BytsPerSec;
   uint16_t rsrvd_sec = boot_sec->BPB_RsvdSecCnt;
@@ -127,22 +187,21 @@ static void create_directory_entry(FILE *disk, uint32_t parent_cluster,
         if (dir_entry->DIR_Name[0] == 0x00 || dir_entry->DIR_Name[0] == 0xE5) {
           // Create LFN entries
           int lfn_entries = 0;
-
-          if (strlen(dirname) > 8) {
-            lfn_entries =
-                create_lfn_entries(dirname, sector_buffer + j, sector_size);
+          size_t dir_len = strlen(dir_name);
+          if (dir_len > 8) {
+            lfn_entries = create_lfn_entries(dir_name, dir_len,
+                                             sector_buffer + j, sector_size);
             j += lfn_entries * sizeof(LFNStr_t);
           }
           // Create the 8.3 entry
-          dir_entry =
-              (DIRStr_t *)(sector_buffer + j/*  + lfn_entries * sizeof(LFNStr_t) */);
+          dir_entry = (DIRStr_t *)(sector_buffer + j);
           memset(dir_entry, 0, sizeof(DIRStr_t));
           uint8_t nt_res = 0;
           char short_name[8];
           if (!lfn_entries) {
-            generate_short_name(dirname, short_name, &nt_res);
+            generate_short_name(dir_name, short_name, &nt_res);
           } else {
-            generate_lfn_short_name(dirname, short_name);
+            generate_lfn_short_name(dir_name, short_name);
           }
           memcpy(dir_entry->DIR_Name, short_name, 8);
           dir_entry->DIR_Attr = ATTR_DIRECTORY;
@@ -160,7 +219,7 @@ static void create_directory_entry(FILE *disk, uint32_t parent_cluster,
 
           write_sector(disk, current_sector + i, sector_buffer, sector_size);
           printf("Created directory entry for %s at cluster %u, sector %u\n",
-                 dirname, new_cluster, current_sector + i);
+                 dir_name, new_cluster, current_sector + i);
           free(sector_buffer);
           return;
         }
@@ -177,58 +236,6 @@ static void create_directory_entry(FILE *disk, uint32_t parent_cluster,
   }
 }
 
-static int create_lfn_entries(const char *lfn, uint8_t *sector_buffer,
-                              uint16_t sector_size) {
-  int lfn_len = strlen(lfn);
-  int num_entries = (lfn_len + 12) / 13;
-  LFNStr_t *lfn_entry;
-
-  char short_name[11];
-  generate_lfn_short_name(lfn, short_name);
-  uint8_t checksum = lfn_checksum((uint8_t *)short_name);
-
-  static int is_incremented = 0;
-  for (int i = num_entries; i > 0; i--) {
-    lfn_entry = (LFNStr_t *)(sector_buffer + (i - 1) * sizeof(LFNStr_t));
-    memset(lfn_entry, 0, sizeof(LFNStr_t));
-
-    lfn_entry->LDIR_Ord = i;
-    if (i == num_entries) {
-      lfn_entry->LDIR_Ord |= 0x40; // Set the last LFN entry bit
-    }
-    lfn_entry->LDIR_Attr = ATTR_LFN;
-    lfn_entry->LDIR_Chksum = checksum;
-    for (int j = 0; j < 13; ++j) {
-      int lfn_index = (i - 1) * 13 + j;
-      if (lfn_index < lfn_len) {
-        if (j < 5) {
-          lfn_entry->LDIR_Name1[j] = lfn[lfn_index];
-        } else if (j < 11) {
-          lfn_entry->LDIR_Name2[j - 5] = lfn[lfn_index];
-        } else {
-          lfn_entry->LDIR_Name3[j - 11] = lfn[lfn_index];
-        }
-      } else {
-        //NOTE: ugly as shit, rework ASAP
-        int k = j;
-        if (k < 5) {
-          lfn_entry->LDIR_Name1[k++] = 0xFFFF;
-        }
-        if (k < 11 && k >= 5) {
-          k++;
-          lfn_entry->LDIR_Name2[k - 5] = 0xFFFF;
-        }
-        if (k >= 11) {
-          lfn_entry->LDIR_Name3[k - 11] = 0xFFFF;
-        }
-        j = k;
-      }
-    }
-  }
-  printf("Created %d LFN entries for %s\n", num_entries, lfn);
-  return num_entries;
-}
-
 static void generate_short_name(const char *dir_name, char *short_name,
                                 uint8_t *nt_res) {
   memset(short_name, ' ', 8);
@@ -241,18 +248,6 @@ static void generate_short_name(const char *dir_name, char *short_name,
     }
     short_name[i++] = toupper(dir_name[j++]);
   }
-
-  // if (dir_name[j] == '.') {
-  //   j++;
-  // }
-  //
-  // i = 8;
-  // while (i < 11 && dir_name[j] && isalnum(dir_name[j])) {
-  //   if (islower(dir_name[j])) {
-  //     *nt_res |= NT_RES_LOWER_CASE_EXT;
-  //   }
-  //   short_name[i++] = toupper(dir_name[j++]);
-  // }
 }
 
 static void generate_lfn_short_name(const char *lfn, char *short_name) {
@@ -291,7 +286,7 @@ void mkdir(FILE *disk, const char *path) {
   read_boot_sector(disk, &boot_sec);
 
   uint32_t parent_cluster = boot_sec.BPB_RootClus;
-  const char *dirname = path;
+  const char *dir_name = path;
 
   uint32_t new_cluster = get_free_cluster(disk, &boot_sec);
   if (new_cluster == 0) {
@@ -302,7 +297,8 @@ void mkdir(FILE *disk, const char *path) {
   update_fat(disk, new_cluster, EOC, boot_sec.BPB_BytsPerSec,
              boot_sec.BPB_RsvdSecCnt);
   clear_cluster(disk, new_cluster, &boot_sec);
-  create_directory_entry(disk, parent_cluster, dirname, new_cluster, &boot_sec);
+  create_directory_entry(disk, parent_cluster, dir_name, new_cluster,
+                         &boot_sec);
 }
 
 int main(int argc, char **argv) {
@@ -312,7 +308,9 @@ int main(int argc, char **argv) {
   }
 
   const char *disk_name = argv[1];
-  const char *path = argv[2];
+  char *path = argv[2];
+  size_t size = strlen(path);
+  path[size] = '\0';
 
   FILE *disk = fopen(disk_name, "r+b");
   if (!disk) {
