@@ -84,16 +84,27 @@ static void clear_cluster(FILE *disk, uint32_t cluster, BootSec_t *boot_sec) {
     return;
   }
   memset(buffer, 0, sector_size);
-  uint32_t first_sector = boot_sec->BPB_HiddSec + boot_sec->BPB_RsvdSecCnt +
-                          (boot_sec->BPB_NumFATs * boot_sec->BPB_FATSz32) +
-                          (cluster - 2) * boot_sec->BPB_SecPerClus;
+
+  // compute first sector of the data region
+  uint32_t fat_size = (boot_sec->BPB_FATSz16 == 0) ? boot_sec->BPB_FATSz32
+                                                   : boot_sec->BPB_FATSz16;
+  uint32_t root_dir_sectors =
+      ((boot_sec->BPB_RootEntCnt * 32) + (sector_size - 1)) / sector_size;
+  uint32_t first_data_sector = boot_sec->BPB_RsvdSecCnt +
+                               (boot_sec->BPB_NumFATs * fat_size) +
+                               root_dir_sectors;
+  uint32_t first_sector_clus =
+      ((cluster - 2) * boot_sec->BPB_SecPerClus) + first_data_sector;
+
   for (uint32_t i = 0; i < boot_sec->BPB_SecPerClus; i++) {
-    write_sector(disk, first_sector + i, buffer, sector_size);
+    write_sector(disk, first_sector_clus + i, buffer, sector_size);
   }
+
   free(buffer);
 }
 
-void fill(const char *src, int8_t src_size, uint16_t *dst, size_t dst_size) {
+static void fill(const char *src, int8_t src_size, uint16_t *dst,
+                 size_t dst_size) {
   for (int i = 0; i < dst_size; i++) {
     if (i > src_size) {
       dst[i] = 0xFFFF;
@@ -146,7 +157,6 @@ static int create_lfn_entries(const char *lfn, size_t lfn_len,
     lfn_entry->LDIR_Attr = ATTR_LFN;
     lfn_entry->LDIR_Chksum = checksum;
   }
-  printf("Created %d LFN entries for %s\n", num_entries, lfn);
   return num_entries;
 }
 
@@ -169,6 +179,46 @@ static void create_directory_entry(FILE *disk, uint32_t parent_cluster,
   uint8_t fat_time_tenth;
   get_fat_time_date(&fat_date, &fat_time, &fat_time_tenth);
 
+  // Initialize the new directory with "." and ".." entries
+  current_sector = boot_sec->BPB_HiddSec + rsrvd_sec +
+                   (boot_sec->BPB_NumFATs * ((boot_sec->BPB_FATSz16 == 0)
+                                                 ? boot_sec->BPB_FATSz32
+                                                 : boot_sec->BPB_FATSz16)) +
+                   (new_cluster - 2) * boot_sec->BPB_SecPerClus;
+
+  // Read the first sector of the new directory cluster
+  read_sector(disk, current_sector, sector_buffer, sector_size);
+
+  // Create the "." entry
+  dir_entry = (DIRStr_t *)(sector_buffer);
+  memset(dir_entry, 0, sizeof(DIRStr_t));
+  memcpy(dir_entry->DIR_Name, ".          ", 11);
+  dir_entry->DIR_Attr = ATTR_DIRECTORY;
+  dir_entry->DIR_FstClusLO = (uint16_t)(new_cluster & 0xFFFF);
+  dir_entry->DIR_FstClusHI = (uint16_t)((new_cluster >> 16) & 0xFFFF);
+  dir_entry->DIR_CrtTimeTenth = fat_time_tenth;
+  dir_entry->DIR_CrtTime = fat_time;
+  dir_entry->DIR_CrtDate = fat_date;
+  dir_entry->DIR_WrtTime = fat_time;
+  dir_entry->DIR_WrtDate = fat_date;
+  dir_entry->DIR_LstAccDate = fat_date;
+
+  // Create the ".." entry
+  dir_entry = (DIRStr_t *)(sector_buffer + sizeof(DIRStr_t));
+  memset(dir_entry, 0, sizeof(DIRStr_t));
+  memcpy(dir_entry->DIR_Name, "..         ", 11);
+  dir_entry->DIR_Attr = ATTR_DIRECTORY;
+  dir_entry->DIR_FstClusLO = (uint16_t)(parent_cluster & 0xFFFF);
+  dir_entry->DIR_FstClusHI = (uint16_t)((parent_cluster >> 16) & 0xFFFF);
+  dir_entry->DIR_CrtTimeTenth = fat_time_tenth;
+  dir_entry->DIR_CrtTime = fat_time;
+  dir_entry->DIR_CrtDate = fat_date;
+  dir_entry->DIR_WrtTime = fat_time;
+  dir_entry->DIR_WrtDate = fat_date;
+  dir_entry->DIR_LstAccDate = fat_date;
+
+  // Write the sector back to disk
+  write_sector(disk, current_sector, sector_buffer, sector_size);
   while (1) {
     uint32_t fat_size = (boot_sec->BPB_FATSz16 == 0) ? boot_sec->BPB_FATSz32
                                                      : boot_sec->BPB_FATSz16;
@@ -213,8 +263,6 @@ static void create_directory_entry(FILE *disk, uint32_t parent_cluster,
           dir_entry->DIR_LstAccDate = fat_date;
 
           write_sector(disk, current_sector + i, sector_buffer, sector_size);
-          printf("Created directory entry for %s at cluster %u, sector %u\n",
-                 dir_name, new_cluster, current_sector + i);
           free(sector_buffer);
           return;
         }
@@ -259,9 +307,12 @@ static void generate_lfn_short_name(const char *lfn, char *short_name) {
 }
 
 static uint8_t lfn_checksum(const uint8_t *name) {
-  uint8_t sum = 0;
-  for (int i = 0; i < 11; i++) {
-    sum = (sum >> 1) + (sum << 7) + name[i];
+  int8_t name_len;
+  uint8_t sum;
+
+  sum = 0;
+  for (name_len = 11; name_len != 0; name_len--) {
+    sum = ((sum & 1) ? 0x80 : 0) + (sum >> 1) + *name++;
   }
   return sum;
 }
