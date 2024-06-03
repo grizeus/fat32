@@ -278,7 +278,13 @@ void list_dir_long(FILE *disk, BootSec_t *boot_sec, uint32_t cluster) {
 
     if (dir_entry.DIR_Attr & ATTR_DIRECTORY) {
       char dir_label[] = "<DIR>";
-      printf("%-8s %-3s %19s %s\n", name, dir_label, date_str, time_str);
+      if (lfn_name) {
+        printf("%-8s %-3s %19s %s  %s\n", name, dir_label, date_str, time_str, lfn_name);
+        free(lfn_name);
+        lfn_name = NULL;
+      } else {
+        printf("%-8s %-3s %19s %s\n", name, dir_label, date_str, time_str);
+      }
       byts_in_use += boot_sec->BPB_SecPerClus * boot_sec->BPB_BytsPerSec;
     } else {
       uint32_t file_size = dir_entry.DIR_FileSize;
@@ -287,7 +293,7 @@ void list_dir_long(FILE *disk, BootSec_t *boot_sec, uint32_t cluster) {
       uint32_t sectors = (float_part == 0) ? integer_part : integer_part + 1;
       byts_in_use += sectors * boot_sec->BPB_BytsPerSec;
       if (lfn_name) {
-        printf("%-8s %-3s %10u %s %s %s\n", name, ext, file_size, date_str,
+        printf("%-8s %-3s %10u %s %s  %s\n", name, ext, file_size, date_str,
                time_str, lfn_name);
         free(lfn_name);
         lfn_name = NULL;
