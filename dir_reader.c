@@ -279,11 +279,11 @@ void list_dir_long(FILE *disk, BootSec_t *boot_sec, uint32_t cluster) {
     if (dir_entry.DIR_Attr & ATTR_DIRECTORY) {
       char dir_label[] = "<DIR>";
       if (lfn_name) {
-        printf("%-8s %-3s %19s %s  %s\n", name, dir_label, date_str, time_str, lfn_name);
+        printf("%-8s  %-3s %19s %s  %s\n", name, dir_label, date_str, time_str, lfn_name);
         free(lfn_name);
         lfn_name = NULL;
       } else {
-        printf("%-8s %-3s %19s %s\n", name, dir_label, date_str, time_str);
+        printf("%-8s  %-3s %19s %s\n", name, dir_label, date_str, time_str);
       }
       byts_in_use += boot_sec->BPB_SecPerClus * boot_sec->BPB_BytsPerSec;
     } else {
