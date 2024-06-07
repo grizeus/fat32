@@ -1,5 +1,3 @@
-#include "bootsec.h"
-#include "directory.h"
 #include <ctype.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -7,17 +5,16 @@
 #include <string.h>
 #include <time.h>
 
+#include "bootsec.h"
+#include "directory.h"
+
 static void generate_short_name(const char *dir_name, char *short_name,
                                 uint8_t *nt_res);
 static uint8_t lfn_checksum(const uint8_t *name);
 static void get_fat_time_date(uint16_t *fat_date, uint16_t *fat_time,
                               uint8_t *fat_time_tenth);
-static void generate_lfn_short_name(const char *lfn, char *short_name, uint8_t* nt_res);
-
-static void read_boot_sector(FILE *disk, BootSec_t *boot_sec) {
-  fseek(disk, 0, SEEK_SET);
-  fread(boot_sec, sizeof(BootSec_t), 1, disk);
-}
+static void generate_lfn_short_name(const char *lfn, char *short_name,
+                                    uint8_t *nt_res);
 
 static void read_sector(FILE *disk, uint32_t sector, uint8_t *buffer,
                         uint16_t sector_size) {
@@ -115,11 +112,12 @@ static void fill(const char *src, int8_t src_size, uint16_t *dst,
 }
 
 static int create_lfn_entries(const char *lfn, size_t lfn_len,
-                              uint8_t *sector_buffer, uint16_t sector_size, char* short_name, uint8_t* nt_res) {
+                              uint8_t *sector_buffer, uint16_t sector_size,
+                              char *short_name, uint8_t *nt_res) {
   int num_entries = (lfn_len + 12) / 13;
 
   generate_lfn_short_name(lfn, short_name, nt_res);
-  uint8_t checksum = lfn_checksum((uint8_t*)short_name);
+  uint8_t checksum = lfn_checksum((uint8_t *)short_name);
 
   uint16_t name1[5] = {0};
   uint16_t name2[6] = {0};
@@ -237,8 +235,9 @@ static void create_directory_entry(FILE *disk, uint32_t parent_cluster,
           char short_name[11] = {" "};
 
           if (dir_len > 8) {
-            lfn_entries = create_lfn_entries(dir_name, dir_len,
-                                             sector_buffer + j, sector_size, short_name, &nt_res);
+            lfn_entries =
+                create_lfn_entries(dir_name, dir_len, sector_buffer + j,
+                                   sector_size, short_name, &nt_res);
             j += lfn_entries * sizeof(LFNStr_t);
           }
 
@@ -293,10 +292,10 @@ static void generate_short_name(const char *dir_name, char *short_name,
     }
     short_name[i++] = toupper(dir_name[j++]);
   }
-  
 }
 
-static void generate_lfn_short_name(const char *lfn, char *short_name, uint8_t *nt_res) {
+static void generate_lfn_short_name(const char *lfn, char *short_name,
+                                    uint8_t *nt_res) {
 
   static int count = 1;
   generate_short_name(lfn, short_name, nt_res);

@@ -2,6 +2,7 @@
 #define BOOT_SECTOR_H
 
 #include <stdint.h>
+#include <stdio.h>
 
 #define FAT_ELEM_SIZE  4 // 4 Bytes in uint32_t
 typedef struct BootSec {
@@ -37,4 +38,5 @@ typedef struct BootSec {
   // all remainig bytes set to 0x00 (only for media where BPB_BytsPerSec > 512)
 } __attribute__((packed, aligned(1))) BootSec_t;
 
+void read_boot_sector(FILE *disk, BootSec_t *boot_sec);
 #endif // BOOT_SECTOR_H

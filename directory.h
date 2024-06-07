@@ -2,6 +2,9 @@
 #define DIR_STR_H
 
 #include <stdint.h>
+#include <stdio.h>
+
+#include "bootsec.h"
 
 #define ATTR_READ_ONLY 0x01
 #define ATTR_HIDDEN 0x02
@@ -14,6 +17,7 @@
 #define EOC 0x0FFFFFF8 // end of cluster
 #define NT_RES_LOWER_CASE_BASE 0x08
 #define NT_RES_LOWER_CASE_EXT 0x10
+#define MAX_MAME_LEN 255
 
 typedef struct DIRStr {
   uint8_t DIR_Name[11];
@@ -40,5 +44,18 @@ typedef struct LFNStr {
   uint16_t LDIR_FstClusLO;
   uint16_t LDIR_Name3[2];
 } __attribute__((packed)) LFNStr_t;
+
+typedef struct {
+  char name[MAX_MAME_LEN];
+  uint32_t cluster;
+  uint32_t size;
+  uint16_t date;
+  uint16_t time;
+  uint8_t attr;
+  char ext[4];
+} EntrSt_t;
+
+int read_dir_entries(FILE *disk, BootSec_t *boot_sec, uint32_t cluster,
+                     EntrSt_t **entries, uint32_t *entry_count);
 
 #endif // DDIR_STR_H
