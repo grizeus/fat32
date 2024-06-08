@@ -3,4 +3,4 @@
 pushd build;
 make -f ../Makefile;
 popd;
-./build/cd small;
+./build/fat small;

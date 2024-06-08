@@ -157,7 +157,8 @@ static int create_lfn_entries(const char *lfn, size_t lfn_len,
   return num_entries;
 }
 
-static void create_directory_entry(FILE *disk, uint32_t parent_cluster,
+static void create_directory_entry(FILE *disk, uint8_t is_dir,
+                                   uint32_t parent_cluster,
                                    const char *dir_name, uint32_t new_cluster,
                                    BootSec_t *boot_sec) {
   uint16_t sector_size = boot_sec->BPB_BytsPerSec;
@@ -168,7 +169,7 @@ static void create_directory_entry(FILE *disk, uint32_t parent_cluster,
     return;
   }
   memset(sector_buffer, 0, sector_size);
-  uint32_t current_cluster = parent_cluster;
+  uint32_t current_clus = parent_cluster;
   uint32_t current_sector;
   DIRStr_t *dir_entry;
 
@@ -176,57 +177,79 @@ static void create_directory_entry(FILE *disk, uint32_t parent_cluster,
   uint8_t fat_time_tenth;
   get_fat_time_date(&fat_date, &fat_time, &fat_time_tenth);
 
-  // Initialize the new directory with "." and ".." entries
-  current_sector = boot_sec->BPB_HiddSec + rsrvd_sec +
-                   (boot_sec->BPB_NumFATs * ((boot_sec->BPB_FATSz16 == 0)
-                                                 ? boot_sec->BPB_FATSz32
-                                                 : boot_sec->BPB_FATSz16)) +
-                   (new_cluster - 2) * boot_sec->BPB_SecPerClus;
+  if (is_dir == 1) {
+    // Initialize the new directory with "." and ".." entries
+    current_sector = boot_sec->BPB_HiddSec + rsrvd_sec +
+                     (boot_sec->BPB_NumFATs * ((boot_sec->BPB_FATSz16 == 0)
+                                                   ? boot_sec->BPB_FATSz32
+                                                   : boot_sec->BPB_FATSz16)) +
+                     (new_cluster - 2) * boot_sec->BPB_SecPerClus;
 
-  // Read the first sector of the new directory cluster
-  read_sector(disk, current_sector, sector_buffer, sector_size);
+    // Read the first sector of the new directory cluster
+    read_sector(disk, current_sector, sector_buffer, sector_size);
 
-  // Create the "." entry
-  dir_entry = (DIRStr_t *)(sector_buffer);
-  memset(dir_entry, 0, sizeof(DIRStr_t));
-  memcpy(dir_entry->DIR_Name, ".          ", 11);
-  dir_entry->DIR_Attr = ATTR_DIRECTORY;
-  dir_entry->DIR_FstClusLO = (uint16_t)(new_cluster & 0xFFFF);
-  dir_entry->DIR_FstClusHI = (uint16_t)((new_cluster >> 16) & 0xFFFF);
-  dir_entry->DIR_CrtTimeTenth = fat_time_tenth;
-  dir_entry->DIR_CrtTime = fat_time;
-  dir_entry->DIR_CrtDate = fat_date;
-  dir_entry->DIR_WrtTime = fat_time;
-  dir_entry->DIR_WrtDate = fat_date;
-  dir_entry->DIR_LstAccDate = fat_date;
+    // Create the "." entry
+    dir_entry = (DIRStr_t *)(sector_buffer);
+    memset(dir_entry, 0, sizeof(DIRStr_t));
+    memcpy(dir_entry->DIR_Name, ".          ", 11);
+    dir_entry->DIR_Attr = ATTR_DIRECTORY;
+    dir_entry->DIR_FstClusLO = (uint16_t)(new_cluster & 0xFFFF);
+    dir_entry->DIR_FstClusHI = (uint16_t)((new_cluster >> 16) & 0xFFFF);
+    dir_entry->DIR_CrtTimeTenth = fat_time_tenth;
+    dir_entry->DIR_CrtTime = fat_time;
+    dir_entry->DIR_CrtDate = fat_date;
+    dir_entry->DIR_WrtTime = fat_time;
+    dir_entry->DIR_WrtDate = fat_date;
+    dir_entry->DIR_LstAccDate = fat_date;
 
-  // Create the ".." entry
-  dir_entry = (DIRStr_t *)(sector_buffer + sizeof(DIRStr_t));
-  memset(dir_entry, 0, sizeof(DIRStr_t));
-  memcpy(dir_entry->DIR_Name, "..         ", 11);
-  dir_entry->DIR_Attr = ATTR_DIRECTORY;
-  dir_entry->DIR_FstClusLO = (uint16_t)(parent_cluster & 0xFFFF);
-  dir_entry->DIR_FstClusHI = (uint16_t)((parent_cluster >> 16) & 0xFFFF);
-  dir_entry->DIR_CrtTimeTenth = fat_time_tenth;
-  dir_entry->DIR_CrtTime = fat_time;
-  dir_entry->DIR_CrtDate = fat_date;
-  dir_entry->DIR_WrtTime = fat_time;
-  dir_entry->DIR_WrtDate = fat_date;
-  dir_entry->DIR_LstAccDate = fat_date;
+    // Create the ".." entry
+    dir_entry = (DIRStr_t *)(sector_buffer + sizeof(DIRStr_t));
+    memset(dir_entry, 0, sizeof(DIRStr_t));
+    memcpy(dir_entry->DIR_Name, "..         ", 11);
+    dir_entry->DIR_Attr = ATTR_DIRECTORY;
+    dir_entry->DIR_FstClusLO = (uint16_t)(parent_cluster & 0xFFFF);
+    dir_entry->DIR_FstClusHI = (uint16_t)((parent_cluster >> 16) & 0xFFFF);
+    dir_entry->DIR_CrtTimeTenth = fat_time_tenth;
+    dir_entry->DIR_CrtTime = fat_time;
+    dir_entry->DIR_CrtDate = fat_date;
+    dir_entry->DIR_WrtTime = fat_time;
+    dir_entry->DIR_WrtDate = fat_date;
+    dir_entry->DIR_LstAccDate = fat_date;
 
-  // Write the sector back to disk
-  write_sector(disk, current_sector, sector_buffer, sector_size);
+    // Write the sector back to disk
+    write_sector(disk, current_sector, sector_buffer, sector_size);
+  }
   while (1) {
+
     uint32_t fat_size = (boot_sec->BPB_FATSz16 == 0) ? boot_sec->BPB_FATSz32
                                                      : boot_sec->BPB_FATSz16;
     current_sector = boot_sec->BPB_HiddSec + rsrvd_sec +
                      (boot_sec->BPB_NumFATs * fat_size) +
-                     (current_cluster - 2) * boot_sec->BPB_SecPerClus;
+                     (current_clus - 2) * boot_sec->BPB_SecPerClus;
+
     for (uint32_t i = 0; i < boot_sec->BPB_SecPerClus; i++) {
+
       read_sector(disk, current_sector + i, sector_buffer, sector_size);
+
       for (uint32_t j = 0; j < sector_size; j += sizeof(DIRStr_t)) {
+
         dir_entry = (DIRStr_t *)(sector_buffer + j);
 
+        char sln_dir_name[11];
+        memset(sln_dir_name, 0x20, 11);
+        size_t dir_len = strlen(dir_name);
+        for (size_t i = 0; i < dir_len; ++i) {
+          sln_dir_name[i] = toupper(dir_name[i]);
+        }
+
+        // if file exist - update access time
+        if (strncmp((char *)dir_entry->DIR_Name, sln_dir_name, 11) == 0) {
+          dir_entry->DIR_LstAccDate = fat_date;
+
+          write_sector(disk, current_sector + i, sector_buffer, sector_size);
+          free(sector_buffer);
+          return;
+        }
         if (dir_entry->DIR_Name[0] == 0x00 || dir_entry->DIR_Name[0] == 0xE5) {
           // Create LFN entries
           int lfn_entries = 0;
@@ -249,11 +272,12 @@ static void create_directory_entry(FILE *disk, uint32_t parent_cluster,
           }
 
           memcpy(dir_entry->DIR_Name, short_name, 11);
-          dir_entry->DIR_Attr = ATTR_DIRECTORY;
           dir_entry->DIR_NTRes = nt_res;
-          dir_entry->DIR_FstClusLO = (uint16_t)(new_cluster & 0xFFFF);
-          dir_entry->DIR_FstClusHI = (uint16_t)((new_cluster >> 16) & 0xFFFF);
-
+          dir_entry->DIR_Attr = (is_dir == 1) ? ATTR_DIRECTORY : ATTR_ARCHIVE;
+          if (is_dir) {
+            dir_entry->DIR_FstClusLO = (uint16_t)(new_cluster & 0xFFFF);
+            dir_entry->DIR_FstClusHI = (uint16_t)((new_cluster >> 16) & 0xFFFF);
+          }
           // Set creation time and date
           dir_entry->DIR_CrtTimeTenth = fat_time_tenth;
           dir_entry->DIR_CrtTime = fat_time;
@@ -269,16 +293,17 @@ static void create_directory_entry(FILE *disk, uint32_t parent_cluster,
       }
     }
     uint32_t next_cluster =
-        get_next_cluster(disk, current_cluster, sector_size, rsrvd_sec);
+        get_next_cluster(disk, current_clus, sector_size, rsrvd_sec);
     if (next_cluster >= EOC) {
       fprintf(stderr, "No free directory entry found\n");
       free(sector_buffer);
       return;
     }
-    current_cluster = next_cluster;
+    current_clus = next_cluster;
   }
 }
 
+void update_file_entry() {}
 static void generate_short_name(const char *dir_name, char *short_name,
                                 uint8_t *nt_res) {
 
@@ -332,45 +357,23 @@ static void get_fat_time_date(uint16_t *fat_date, uint16_t *fat_time,
   *fat_time_tenth = (uint8_t)((t->tm_sec % 2) * 100);
 }
 
-void mkdir(FILE *disk, const char *path) {
-  BootSec_t boot_sec;
-  read_boot_sector(disk, &boot_sec);
+void mkentry(FILE *disk, BootSec_t *boot_sec, char *path, uint8_t is_dir,
+             uint32_t current_clus) {
 
-  uint32_t parent_cluster = boot_sec.BPB_RootClus;
-  const char *dir_name = path;
+  uint32_t parent_cluster = current_clus;
+  char *dir_name = path;
+  size_t size = strlen(path);
+  dir_name[size] = '\0';
 
-  uint32_t new_cluster = get_free_cluster(disk, &boot_sec);
+  uint32_t new_cluster = get_free_cluster(disk, boot_sec);
   if (new_cluster == 0) {
     fprintf(stderr, "No free clusters available\n");
     exit(EXIT_FAILURE);
   }
 
-  update_fat(disk, new_cluster, EOC, boot_sec.BPB_BytsPerSec,
-             boot_sec.BPB_RsvdSecCnt);
-  clear_cluster(disk, new_cluster, &boot_sec);
-  create_directory_entry(disk, parent_cluster, dir_name, new_cluster,
-                         &boot_sec);
-}
-
-int main(int argc, char **argv) {
-  if (argc < 3) {
-    fprintf(stderr, "Usage: %s <disk_image> <path>\n", argv[0]);
-    return 1;
-  }
-
-  const char *disk_name = argv[1];
-  char *path = argv[2];
-  size_t size = strlen(path);
-  path[size] = '\0';
-
-  FILE *disk = fopen(disk_name, "r+b");
-  if (!disk) {
-    fprintf(stderr, "Failed to open disk image\n");
-    return EXIT_FAILURE;
-  }
-
-  mkdir(disk, path);
-  fclose(disk);
-
-  return EXIT_SUCCESS;
+  update_fat(disk, new_cluster, EOC, boot_sec->BPB_BytsPerSec,
+             boot_sec->BPB_RsvdSecCnt);
+  clear_cluster(disk, new_cluster, boot_sec);
+  create_directory_entry(disk, is_dir, parent_cluster, dir_name, new_cluster,
+                         boot_sec);
 }

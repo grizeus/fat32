@@ -32,8 +32,8 @@ uint32_t get_FATSz32(BootSec_t *boot_sec) {
 
   uint32_t TmpVal1 =
       FAT_ELEM_SIZE * (boot_sec->BPB_TotSec32 - boot_sec->BPB_RsvdSecCnt);
-  uint32_t TmpVal2 = (boot_sec->BPB_SecPerClus * BYTS_PER_SEC) +
-                     (FAT_ELEM_SIZE * NUM_FATS);
+  uint32_t TmpVal2 =
+      (boot_sec->BPB_SecPerClus * BYTS_PER_SEC) + (FAT_ELEM_SIZE * NUM_FATS);
 
   fat_size32 = TmpVal1 / TmpVal2;
   fat_size32 += 1; // round up
@@ -68,7 +68,6 @@ int format_disk(const char *filename) {
 
   fseek(file, 0, SEEK_END);
   const uint32_t disksize = ftell(file);
-  printf("Disksize %d Mb\n", disksize / (1000 * 1000));
   fclose(file);
 
   file = fopen(filename, "wb");
@@ -98,12 +97,10 @@ int format_disk(const char *filename) {
   uint32_t fat_size = get_FATSz32(boot_sec);
   boot_sec->BPB_FATSz32 = fat_size;
   boot_sec->BPB_ExtFlags = 0;
-  boot_sec->BPB_FSVer = NULL_BYTE;
   boot_sec->BPB_RootClus = 2;
   boot_sec->BPB_FSInfo = 1;
   boot_sec->BPB_BkBootSec = 6;
   boot_sec->BS_DrvNum = 0x80;
-  boot_sec->BS_Reserved1 = NULL_BYTE;
   boot_sec->BS_BootSig = 0x29;
 
   // generate volID from current date and time
@@ -147,8 +144,8 @@ int format_disk(const char *filename) {
   rsrvd_fat_sec[1] = 0x0FFFFFFF;
   rsrvd_fat_sec[2] = 0x0FFFFFFF;
 
-  uint32_t user_area = boot_sec->BPB_TotSec32 - boot_sec->BPB_RsvdSecCnt -
-                       (NUM_FATS * fat_size);
+  uint32_t user_area =
+      boot_sec->BPB_TotSec32 - boot_sec->BPB_RsvdSecCnt - (NUM_FATS * fat_size);
   uint32_t cluster_count = user_area / boot_sec->BPB_SecPerClus;
 
   fsinfo->FSI_FreeCount = (user_area / boot_sec->BPB_SecPerClus) - 1;
@@ -185,7 +182,7 @@ int format_disk(const char *filename) {
   }
 
   fclose(file);
-  printf("Disk with id %u was formatted\n", boot_sec->BS_VOlId);
+  printf("Disk was formatted\n");
 
   free(boot_sec);
   free(fsinfo);
