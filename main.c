@@ -7,28 +7,44 @@
 #include "directory.h"
 
 extern void list_dir(FILE *disk, BootSec_t *boot_sec, uint32_t cluster);
-extern void mkentry(FILE *disk, BootSec_t *boot_sec, const char *path,
-                    uint8_t is_dir, uint32_t current_clus);
+extern void mkdir(FILE *disk, BootSec_t *boot_sec, const char *path,
+                  uint32_t current_clus);
 extern int change_dir(FILE *disk, BootSec_t *boot_sec, const char *path,
                       uint32_t *current_clus);
 extern int read_dir_entries(FILE *disk, BootSec_t *boot_sec, uint32_t cluster,
                             EntrSt_t **entries, uint32_t *entry_count);
+extern void touch(FILE *disk, BootSec_t *boot_sec, char *path,
+                  uint32_t current_clus);
+extern int create_disk(FILE *disk, const char *disk_name, uint32_t disk_size,
+                       char modifier);
+extern int format_disk(const char *filename);
+
 int main(int argc, char **argv) {
 
   if (argc < 2) {
     fprintf(stderr, "Usage: %s <disk_image>\n", argv[0]);
-    return 1;
+    return -1;
   }
-
-  FILE *disk = fopen(argv[1], "r+b");
+  const char *disk_name = argv[1];
+  uint8_t is_fat32 = 0;
+  FILE *disk = fopen(disk_name, "r+b");
   if (!disk) {
-    fprintf(stderr, "Failed to open disk image: %s\n", argv[1]);
-    return 1;
+    if (create_disk(disk, disk_name, 20, 'M') != 0) {
+      return -1;
+    } else {
+      disk = fopen(disk_name, "r+b");
+    }
   }
 
   BootSec_t boot_sec;
-  read_boot_sector(disk, &boot_sec);
-  uint32_t current_clus = boot_sec.BPB_RootClus;
+  uint32_t current_clus;
+  if (read_boot_sector(disk, &boot_sec) == 0) {
+
+    is_fat32 = (boot_sec.BPB_FATSz16 == 0 && boot_sec.BPB_FATSz32 != 0) ? 1 : 0;
+    if (is_fat32) {
+      current_clus = boot_sec.BPB_RootClus;
+    }
+  }
 
   char cwd[512] = "/"; // Initialize with the root directory path
   while (1) {
@@ -40,6 +56,25 @@ int main(int argc, char **argv) {
     }
 
     command[strcspn(command, "\n")] = '\0'; // Remove the newline character
+
+    if (!is_fat32 && strncmp(command, "format", 6) == 0) {
+      fclose(disk);
+      format_disk(disk_name);
+      disk = fopen(disk_name, "r+b");
+      if (!disk) {
+        fprintf(stderr, "Failed to open disk image after formatting: %s\n",
+                disk_name);
+        return -1;
+      }
+
+      read_boot_sector(disk, &boot_sec);
+      is_fat32 = 1;
+      current_clus = boot_sec.BPB_RootClus;
+      continue;
+    } else if (!is_fat32) {
+       fprintf(stderr, "Unknown disk format\n");
+       continue;
+    }
 
     if (strncmp(command, "ls", 2) == 0) {
       list_dir(disk, &boot_sec, current_clus);
@@ -68,6 +103,8 @@ int main(int argc, char **argv) {
             } else {
               strcpy(temp_cwd, "/"); // root directory case
             }
+          } else if (strncmp(token, ".", 1) == 0) {
+            strcpy(cwd, temp_cwd);
           } else {
             // Append the directory component to temp_cwd
             if (parent_clus >
@@ -101,11 +138,25 @@ int main(int argc, char **argv) {
       if (entries) {
         free(entries);
       }
-      mkentry(disk, &boot_sec, path, 1, current_clus);
+      mkdir(disk, &boot_sec, path, current_clus);
     } else if (strncmp(command, "touch ", 6) == 0) {
-      const char *path = command + 6;
-      mkentry(disk, &boot_sec, path, 0, current_clus);
-    } else if (strncmp(command, "exit", 4) == 0) {
+      char *path = command + 6;
+      touch(disk, &boot_sec, path, current_clus);
+    } else if (strncmp(command, "format", 6) == 0) {
+      fclose(disk);
+      format_disk(disk_name);
+      disk = fopen(disk_name, "r+b");
+      if (!disk) {
+        fprintf(stderr, "Failed to open disk image after formatting: %s\n",
+                disk_name);
+        return -1;
+      }
+
+      read_boot_sector(disk, &boot_sec);
+      is_fat32 = 1;
+      current_clus = boot_sec.BPB_RootClus;
+    } else if (strncmp(command, "exit", 4) == 0 ||
+               strncmp(command, "q", 1) == 0) {
       break;
     } else {
       fprintf(stderr, "Unknown command: %s\n", command);

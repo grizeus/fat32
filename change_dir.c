@@ -7,9 +7,6 @@
 #include "bootsec.h"
 #include "directory.h"
 
-extern void list_dir(FILE *disk, BootSec_t *boot_sec, uint32_t cluster);
-extern void mkdir(FILE *disk, const char *path, uint32_t current_clus);
-
 int change_dir(FILE *disk, BootSec_t *boot_sec, const char *path,
                uint32_t *current_clus) {
 
@@ -40,7 +37,8 @@ int change_dir(FILE *disk, BootSec_t *boot_sec, const char *path,
 
     EntrSt_t *entries = NULL;
     uint32_t entry_count = 0;
-    int found = 0;
+    uint8_t found = 0;
+    uint8_t is_dir = 0;
 
     if (read_dir_entries(disk, boot_sec, cluster, &entries, &entry_count) ==
         1) {
@@ -50,17 +48,24 @@ int change_dir(FILE *disk, BootSec_t *boot_sec, const char *path,
 
     for (uint32_t i = 0; i < entry_count; i++) {
       if (strcmp(entries[i].name, token) == 0) {
-        // Found the next component
-        cluster = entries[i].cluster;
-        found = 1;
-        break;
+        if (entries[i].attr & ATTR_DIRECTORY) {
+          // Found the next component
+          cluster = entries[i].cluster;
+          found = 1;
+          is_dir = 1;
+          break;
+        }
       }
     }
 
     free(entries);
 
+    if (!found && !is_dir) {
+      fprintf(stderr, "%s is not a directory\n", path);
+      return 1;
+    }
+
     if (!found) {
-      // Directory component not found
       fprintf(stderr, "Directory for %s is not found\n", path);
       return 1;
     }

@@ -26,7 +26,7 @@ static uint32_t code_volID(struct tm *time_info) {
   return VolID;
 }
 
-uint32_t get_FATSz32(BootSec_t *boot_sec) {
+static uint32_t get_FATSz32(BootSec_t *boot_sec) {
 
   uint32_t fat_size32;
 
@@ -41,7 +41,7 @@ uint32_t get_FATSz32(BootSec_t *boot_sec) {
   return fat_size32;
 }
 // write to file with error checking
-int write_check(const void *data, uint32_t offset, size_t data_size,
+static int write_check(const void *data, uint32_t offset, size_t data_size,
                 size_t count, FILE *file) {
 
   if (fseek(file, offset, SEEK_SET) == -1) {
@@ -59,23 +59,23 @@ int write_check(const void *data, uint32_t offset, size_t data_size,
 
 int format_disk(const char *filename) {
 
-  FILE *file = fopen(filename, "r");
-  if (!file) {
+  FILE *disk = fopen(filename, "r");
+  if (!disk) {
     fprintf(stderr, "File open failed %d: %s.\n", errno, strerror(errno));
-    fclose(file);
+    fclose(disk);
     return -1;
   }
 
-  fseek(file, 0, SEEK_END);
-  const uint32_t disksize = ftell(file);
-  fclose(file);
+  fseek(disk, 0, SEEK_END);
+  const uint32_t disksize = ftell(disk);
+  fclose(disk);
 
-  file = fopen(filename, "wb");
+  disk = fopen(filename, "wb");
   // init boot sector
   BootSec_t *boot_sec = (BootSec_t *)malloc(sizeof(BootSec_t));
   if (!boot_sec) {
     fprintf(stderr, "Failed to allocate memory for BootSector.\n");
-    fclose(file);
+    fclose(disk);
     return -1;
   }
 
@@ -119,7 +119,7 @@ int format_disk(const char *filename) {
   if (!fsinfo) {
     fprintf(stderr, "Failed to allocate memory for fsinfo.\n");
     free(boot_sec);
-    fclose(file);
+    fclose(disk);
     return -1;
   }
 
@@ -135,7 +135,7 @@ int format_disk(const char *filename) {
     fprintf(stderr, "Failed to allocate memory for FAT.\n");
     free(boot_sec);
     free(fsinfo);
-    fclose(file);
+    fclose(disk);
     return -1;
   }
   memset(rsrvd_fat_sec, 0, BYTS_PER_SEC);
@@ -154,12 +154,12 @@ int format_disk(const char *filename) {
   // write bootsec and FSInfo to file in two copy (original and backup)
   for (size_t i = 0; i < 2; ++i) {
     uint16_t start = (i == 0) ? 0 : boot_sec->BPB_BkBootSec;
-    if (write_check(boot_sec, start * BYTS_PER_SEC, BYTS_PER_SEC, 1, file) ==
+    if (write_check(boot_sec, start * BYTS_PER_SEC, BYTS_PER_SEC, 1, disk) ==
         -1) {
       return -1;
     }
     if (write_check(fsinfo, ((start + 1) + boot_sec->BPB_FSInfo) * BYTS_PER_SEC,
-                    BYTS_PER_SEC, 1, file) == -1) {
+                    BYTS_PER_SEC, 1, disk) == -1) {
       return -1;
     }
   }
@@ -167,21 +167,21 @@ int format_disk(const char *filename) {
   for (size_t i = 0; i < NUM_FATS; ++i) {
     uint16_t start = boot_sec->BPB_RsvdSecCnt + (i * fat_size);
     if (write_check(rsrvd_fat_sec, start * BYTS_PER_SEC, BYTS_PER_SEC, 1,
-                    file) == -1) {
+                    disk) == -1) {
       free(boot_sec);
       free(fsinfo);
       free(rsrvd_fat_sec);
-      fclose(file);
+      fclose(disk);
       return -1;
     }
   }
 
   // write NULL_BYTE to end of file
-  if (write_check(&NULL_BYTE, disksize - 1, sizeof(NULL_BYTE), 1, file) == -1) {
+  if (write_check(&NULL_BYTE, disksize - 1, sizeof(NULL_BYTE), 1, disk) == -1) {
     return -1;
   }
 
-  fclose(file);
+  fclose(disk);
   printf("Disk was formatted\n");
 
   free(boot_sec);
@@ -190,13 +190,13 @@ int format_disk(const char *filename) {
 
   return 0;
 }
-
-int main(int argc, char *argv[]) {
-
-  if (argc != 2) {
-    fprintf(stderr, "Usage: %s <disk_image>\n", argv[0]);
-    return 1;
-  }
-
-  return format_disk(argv[1]);
-}
+//
+// int main(int argc, char *argv[]) {
+//
+//   if (argc != 2) {
+//     fprintf(stderr, "Usage: %s <disk_image>\n", argv[0]);
+//     return 1;
+//   }
+//
+//   return format_disk(argv[1]);
+// }
