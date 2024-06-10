@@ -11,7 +11,7 @@ int create_disk(FILE* disk, const char* disk_name, uint32_t disk_size, char modi
     return -1;
   }
 
-  uint32_t desired_size;
+  uint32_t desired_size = 0;
   if (toupper(modifier) == 'K') {
     desired_size = 1000UL * disk_size;
   } else if (toupper(modifier) == 'M') {

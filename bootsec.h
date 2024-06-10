@@ -4,8 +4,10 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#define FAT_ELEM_SIZE  4 // 4 Bytes in uint32_t
+#define FAT_ELEM_SIZE 4 // 4 Bytes in uint32_t
+
 typedef struct BootSec {
+
   uint8_t BS_jmpBoot[3];     // JMP instruction
   uint8_t BS_OEMName[8];     // OEM name
   uint16_t BPB_BytsPerSec;   // Bytes per sector
@@ -38,5 +40,5 @@ typedef struct BootSec {
   // all remainig bytes set to 0x00 (only for media where BPB_BytsPerSec > 512)
 } __attribute__((packed, aligned(1))) BootSec_t;
 
-int read_boot_sector(FILE *disk, BootSec_t *boot_sec);
+int read_boot_sector(FILE* disk, BootSec_t* boot_sec);
 #endif // BOOT_SECTOR_H

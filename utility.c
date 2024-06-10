@@ -23,6 +23,7 @@ uint32_t get_next_cluster(FILE* disk, uint32_t cluster, uint16_t sector_size, ui
   uint32_t offset = (cluster * 4) % sector_size;
   uint8_t* sector_buffer = malloc(sector_size);
   if (sector_buffer == NULL) {
+
     fprintf(stderr, "Memory allocation failed\n");
     return 1;
   }
@@ -37,7 +38,9 @@ uint32_t get_free_cluster(FILE* disk, BootSec_t* boot_sec) {
 
   for (uint32_t cluster = 2; cluster < (boot_sec->BPB_TotSec32 / boot_sec->BPB_SecPerClus);
        cluster++) {
+
     if (get_next_cluster(disk, cluster, boot_sec->BPB_BytsPerSec, boot_sec->BPB_RsvdSecCnt) == 0) {
+
       return cluster;
     }
   }
@@ -46,10 +49,12 @@ uint32_t get_free_cluster(FILE* disk, BootSec_t* boot_sec) {
 
 void update_fat(FILE* disk, uint32_t cluster, uint32_t value, uint16_t sector_size,
                 uint16_t rsrvd_sec) {
+
   uint32_t fat_sector = rsrvd_sec + (cluster * 4) / sector_size;
   uint32_t offset = (cluster * 4) % sector_size;
   uint8_t* sector_buffer = malloc(sector_size);
   if (!sector_buffer) {
+
     fprintf(stderr, "Memory allocation failed\n");
     return;
   }
@@ -65,6 +70,7 @@ void clear_cluster(FILE* disk, uint32_t cluster, BootSec_t* boot_sec) {
   uint16_t sector_size = boot_sec->BPB_BytsPerSec;
   uint8_t* buffer = malloc(sector_size);
   if (!buffer) {
+
     fprintf(stderr, "Memory allocation failed\n");
     return;
   }
@@ -78,36 +84,43 @@ void clear_cluster(FILE* disk, uint32_t cluster, BootSec_t* boot_sec) {
   uint32_t first_sector_clus = ((cluster - 2) * boot_sec->BPB_SecPerClus) + first_data_sector;
 
   for (uint32_t i = 0; i < boot_sec->BPB_SecPerClus; i++) {
+
     write_sector(disk, first_sector_clus + i, buffer, sector_size);
   }
 
   free(buffer);
 }
 
-static void fill_idle(const char* src, int8_t src_size, uint16_t* dst, size_t dst_size) {
-  for (int i = 0; i < dst_size; i++) {
+static void fill_idle(const char* src, size_t src_size, uint16_t* dst, size_t dst_size) {
+
+  for (size_t i = 0; i < dst_size; i++) {
+
     if (i > src_size) {
+
       dst[i] = 0xFFFF;
     } else {
+
       dst[i] = (uint16_t)src[i];
     }
   }
 }
 
 static uint8_t lfn_checksum(const uint8_t* name) {
+
   int8_t name_len;
   uint8_t sum;
 
   sum = 0;
   for (name_len = 11; name_len != 0; name_len--) {
+
     sum = ((sum & 1) ? 0x80 : 0) + (sum >> 1) + *name++;
   }
   return (sum);
 }
 
-int create_lfn_entries(const char* lfn, size_t lfn_len, uint8_t* sector_buffer,
-                       uint16_t sector_size, char* short_name, uint8_t* nt_res,
-                       void (*generate_short_name)(const char*, char*, uint8_t*)) {
+int create_lfn_entries(const char* lfn, size_t lfn_len, uint8_t* sector_buffer, char* short_name,
+                       uint8_t* nt_res, void (*generate_short_name)(const char*, char*, uint8_t*)) {
+
   int num_entries = (lfn_len + 12) / 13;
 
   generate_lfn_short_name(lfn, short_name, nt_res, generate_short_name);
@@ -123,14 +136,16 @@ int create_lfn_entries(const char* lfn, size_t lfn_len, uint8_t* sector_buffer,
   memcpy(src, lfn, lfn_len);
 
   for (int i = 0; i < num_entries; i++) {
+
     uint8_t entry_idx = num_entries - 1 - i;
     LFNStr_t* lfn_entry = (LFNStr_t*)(sector_buffer + entry_idx * sizeof(LFNStr_t));
     memset(lfn_entry, 0, sizeof(LFNStr_t));
 
-    int8_t src_size = 13;
+    size_t src_size = 13;
     const char* src_ptr = src + 13 * i;
 
     if (i == num_entries - 1) {
+
       src_size = lfn_len - 13 * (num_entries - 1);
     }
 
@@ -144,6 +159,7 @@ int create_lfn_entries(const char* lfn, size_t lfn_len, uint8_t* sector_buffer,
 
     lfn_entry->LDIR_Ord = i + 1;
     if (i == num_entries - 1) {
+
       lfn_entry->LDIR_Ord |= LAST_LONG_ENTRY; // Set the last LFN entry bit
     }
     lfn_entry->LDIR_Attr = ATTR_LFN;
@@ -154,13 +170,16 @@ int create_lfn_entries(const char* lfn, size_t lfn_len, uint8_t* sector_buffer,
 
 void generate_lfn_short_name(const char* lfn, char* short_name, uint8_t* nt_res,
                              void (*generate_short_name)(const char*, char*, uint8_t*)) {
+
   int count = 1;
   generate_short_name(lfn, short_name, nt_res);
 
   if (count > 9) {
+
     short_name[6] = '~';
     short_name[7] = '1' + count % 10;
   } else {
+
     short_name[6] = '~';
     short_name[7] = '0' + count;
   }

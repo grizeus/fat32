@@ -20,6 +20,7 @@
 #define MAX_MAME_LEN 255
 
 typedef struct DIRStr {
+
   uint8_t DIR_Name[11];
   uint8_t DIR_Attr;
   uint8_t DIR_NTRes;
@@ -35,6 +36,7 @@ typedef struct DIRStr {
 } __attribute__((packed)) DIRStr_t;
 
 typedef struct LFNStr {
+
   uint8_t LDIR_Ord;
   uint16_t LDIR_Name1[5];
   uint8_t LDIR_Attr;
@@ -46,6 +48,7 @@ typedef struct LFNStr {
 } __attribute__((packed)) LFNStr_t;
 
 typedef struct {
+
   char name[MAX_MAME_LEN];
   uint32_t cluster;
   uint32_t size;
@@ -55,7 +58,7 @@ typedef struct {
   char ext[4];
 } EntrSt_t;
 
-int read_dir_entries(FILE *disk, BootSec_t *boot_sec, uint32_t cluster,
-                     EntrSt_t **entries, uint32_t *entry_count);
+int read_dir_entries(FILE* disk, BootSec_t* boot_sec, uint32_t cluster, EntrSt_t** entries,
+                     uint32_t* entry_count);
 
 #endif // DDIR_STR_H
