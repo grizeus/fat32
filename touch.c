@@ -11,7 +11,6 @@
 
 static void generate_short_filename(const char *file_name, char *short_name,
                                     uint8_t *nt_res) {
-
   memset(short_name, 0x20, 11); // 0x20 for whitespace
   *nt_res = 0;
 

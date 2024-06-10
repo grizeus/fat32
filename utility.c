@@ -6,16 +6,19 @@
 #include "utility.h"
 
 void read_sector(FILE* disk, uint32_t sector, uint8_t* buffer, uint16_t sector_size) {
+
   fseek(disk, sector * sector_size, SEEK_SET);
   fread(buffer, 1, sector_size, disk);
 }
 
 void write_sector(FILE* disk, uint32_t sector, const uint8_t* buffer, uint16_t sector_size) {
+
   fseek(disk, sector * sector_size, SEEK_SET);
   fwrite(buffer, 1, sector_size, disk);
 }
 
 uint32_t get_next_cluster(FILE* disk, uint32_t cluster, uint16_t sector_size, uint16_t rsrvd_sec) {
+
   uint32_t fat_sector = rsrvd_sec + (cluster * 4) / sector_size;
   uint32_t offset = (cluster * 4) % sector_size;
   uint8_t* sector_buffer = malloc(sector_size);
@@ -31,6 +34,7 @@ uint32_t get_next_cluster(FILE* disk, uint32_t cluster, uint16_t sector_size, ui
 }
 
 uint32_t get_free_cluster(FILE* disk, BootSec_t* boot_sec) {
+
   for (uint32_t cluster = 2; cluster < (boot_sec->BPB_TotSec32 / boot_sec->BPB_SecPerClus);
        cluster++) {
     if (get_next_cluster(disk, cluster, boot_sec->BPB_BytsPerSec, boot_sec->BPB_RsvdSecCnt) == 0) {
@@ -57,6 +61,7 @@ void update_fat(FILE* disk, uint32_t cluster, uint32_t value, uint16_t sector_si
 }
 
 void clear_cluster(FILE* disk, uint32_t cluster, BootSec_t* boot_sec) {
+
   uint16_t sector_size = boot_sec->BPB_BytsPerSec;
   uint8_t* buffer = malloc(sector_size);
   if (!buffer) {
@@ -159,11 +164,11 @@ void generate_lfn_short_name(const char* lfn, char* short_name, uint8_t* nt_res,
     short_name[6] = '~';
     short_name[7] = '0' + count;
   }
-
   count++;
 }
 
 void get_fat_time_date(uint16_t* fat_date, uint16_t* fat_time, uint8_t* fat_time_tenth) {
+
   time_t now = time(NULL);
   struct tm* t = localtime(&now);
 
