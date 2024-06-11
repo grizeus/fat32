@@ -15,7 +15,5 @@ void update_fat(FILE* disk, uint32_t cluster, uint32_t value, uint16_t sector_si
 void clear_cluster(FILE* disk, uint32_t cluster, BootSec_t* boot_sec);
 int create_lfn_entries(const char* lfn, size_t lfn_len, uint8_t* sector_buffer, char* short_name,
                        uint8_t* nt_res, void (*generate_short_name)(const char*, char*, uint8_t*));
-void generate_lfn_short_name(const char* lfn, char* short_name, uint8_t* nt_res,
-                             void (*generate_short_name)(const char*, char*, uint8_t*));
 void get_fat_time_date(uint16_t* fat_date, uint16_t* fat_time, uint8_t* fat_time_tenth);
 #endif // UTILITY_H

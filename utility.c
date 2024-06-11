@@ -1,9 +1,16 @@
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
 #include "directory.h"
 #include "utility.h"
+
+extern int format_disk(const char* filename);
+extern void list_dir(FILE* disk, BootSec_t* boot_sec, uint32_t cluster);
+extern void mkdir(FILE* disk, BootSec_t* boot_sec, const char* path, uint32_t current_clus);
+extern int change_dir(FILE* disk, BootSec_t* boot_sec, const char* path, uint32_t* current_clus);
+extern void touch(FILE* disk, BootSec_t* boot_sec, char* path, uint32_t current_clus);
 
 void read_sector(FILE* disk, uint32_t sector, uint8_t* buffer, uint16_t sector_size) {
 
@@ -118,6 +125,24 @@ static uint8_t lfn_checksum(const uint8_t* name) {
   return (sum);
 }
 
+static void generate_lfn_short_name(const char* lfn, char* short_name, uint8_t* nt_res,
+                                    void (*generate_short_name)(const char*, char*, uint8_t*)) {
+
+  int count = 1;
+  generate_short_name(lfn, short_name, nt_res);
+
+  if (count > 9) {
+
+    short_name[6] = '~';
+    short_name[7] = '1' + count % 10;
+  } else {
+
+    short_name[6] = '~';
+    short_name[7] = '0' + count;
+  }
+  count++;
+}
+
 int create_lfn_entries(const char* lfn, size_t lfn_len, uint8_t* sector_buffer, char* short_name,
                        uint8_t* nt_res, void (*generate_short_name)(const char*, char*, uint8_t*)) {
 
@@ -168,24 +193,6 @@ int create_lfn_entries(const char* lfn, size_t lfn_len, uint8_t* sector_buffer, 
   return num_entries;
 }
 
-void generate_lfn_short_name(const char* lfn, char* short_name, uint8_t* nt_res,
-                             void (*generate_short_name)(const char*, char*, uint8_t*)) {
-
-  int count = 1;
-  generate_short_name(lfn, short_name, nt_res);
-
-  if (count > 9) {
-
-    short_name[6] = '~';
-    short_name[7] = '1' + count % 10;
-  } else {
-
-    short_name[6] = '~';
-    short_name[7] = '0' + count;
-  }
-  count++;
-}
-
 void get_fat_time_date(uint16_t* fat_date, uint16_t* fat_time, uint8_t* fat_time_tenth) {
 
   time_t now = time(NULL);
@@ -194,4 +201,112 @@ void get_fat_time_date(uint16_t* fat_date, uint16_t* fat_time, uint8_t* fat_time
   *fat_date = ((t->tm_year - 80) << 9) | ((t->tm_mon + 1) << 5) | t->tm_mday;
   *fat_time = (t->tm_hour << 11) | (t->tm_min << 5) | (t->tm_sec / 2);
   *fat_time_tenth = (uint8_t)((t->tm_sec % 2) * 100);
+}
+
+static void update_cwd(char* cwd, char* path) {
+
+  char temp_cwd[512];
+  if (path[0] == '/') {
+
+    strcpy(temp_cwd, "/");
+  } else {
+
+    strcpy(temp_cwd, cwd);
+  }
+
+  char* token = strtok(path, "/");
+  while (token != NULL) {
+
+    if (strncmp(token, "..", 2) == 0) {
+
+      char* last_slash = strrchr(temp_cwd, '/');
+      if (last_slash != NULL && last_slash != temp_cwd) {
+
+        *last_slash = '\0';
+      } else {
+
+        strcpy(temp_cwd, "/");
+      }
+    } else if (strncmp(token, ".", 1) != 0) {
+
+      if (temp_cwd[strlen(temp_cwd) - 1] != '/') {
+
+        strcat(temp_cwd, "/");
+      }
+      strcat(temp_cwd, token);
+    }
+    token = strtok(NULL, "/");
+  }
+  strcpy(cwd, temp_cwd);
+}
+
+void handle_command(FILE* disk, const char* disk_name, BootSec_t* boot_sec, uint8_t* is_fat32,
+                    uint32_t* current_clus, char* cwd, char* command) {
+
+  if (!*is_fat32) {
+
+    if (strncmp(command, "format", 6) == 0) {
+
+      fclose(disk);
+      format_disk(disk_name);
+      disk = fopen(disk_name, "r+b");
+      if (!disk) {
+
+        fprintf(stderr, "Failed to open disk image after formatting: %s\n", disk_name);
+        exit(-1);
+      }
+      read_boot_sector(disk, boot_sec);
+      *is_fat32 = 1;
+      *current_clus = boot_sec->BPB_RootClus;
+    } else {
+
+      fprintf(stderr, "Unknown disk format\n");
+    }
+  } else if (strncmp(command, "ls", 2) == 0) {
+
+    list_dir(disk, boot_sec, *current_clus);
+  } else if (strncmp(command, "cd ", 3) == 0) {
+
+    char* path = command + 3;
+    if (change_dir(disk, boot_sec, path, current_clus) == 1) {
+
+      fprintf(stderr, "Failed to change directory: %s\n", path);
+    } else {
+
+      update_cwd(cwd, path);
+    }
+  } else if (strncmp(command, "mkdir ", 6) == 0) {
+
+    const char* path = command + 6;
+    EntrSt_t* entries = NULL;
+    uint32_t entry_count = 0;
+    read_dir_entries(disk, boot_sec, *current_clus, &entries, &entry_count);
+    uint8_t is_exist = 0;
+    for (size_t i = 0; i < entry_count; ++i) {
+
+      if (strcmp(entries[i].name, path) == 0) {
+
+        fprintf(stderr, "Directory %s already exists\n", path);
+        free(entries);
+        entries = NULL;
+        is_exist = 1;
+        break;
+      }
+    }
+    if (!is_exist) {
+
+      mkdir(disk, boot_sec, path, *current_clus);
+    }
+    if (entries) {
+
+      free(entries);
+    }
+  } else if (strncmp(command, "touch ", 6) == 0) {
+
+    char* path = command + 6;
+    touch(disk, boot_sec, path, *current_clus);
+  } else {
+
+    fprintf(stderr, "Unknown command: %s\n", command);
+  }
 }
