@@ -31,7 +31,7 @@ pub fn build(b: *std.Build) void {
 
     for (c_files) |file| {
         exe.addCSourceFile(.{
-            .file = .{ .path = file },
+            .file = .{ .cwd_relative = file },
             .flags = &[_][]const u8{ "-Wall", "-Wextra" },
         });
     }
